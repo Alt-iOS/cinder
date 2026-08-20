@@ -45,8 +45,8 @@ defmodule Cinder.Renderers.BulkActions do
     <div class={@theme.bulk_actions_container_class} data-key="bulk_actions_container_class">
       <%= for {slot, index} <- Enum.with_index(@slots) do %>
         <span
-          phx-click={JS.push("bulk_action_execute", value: %{index: index}, target: @myself)}
-          data-confirm={slot[:confirm] && interpolate_text(slot[:confirm], @selected_count)}
+          phx-click={action_click(slot, index, @myself)}
+          data-confirm={confirmation_message(slot, @selected_count)}
           class="contents"
         >
           <%= if has_label?(slot) do %>
@@ -62,6 +62,9 @@ defmodule Cinder.Renderers.BulkActions do
         </span>
       <% end %>
     </div>
+    <%= if confirmation_slot_open?(assigns) do %>
+      {render_slot(@bulk_action_confirmation_slot, confirmation_context(assigns))}
+    <% end %>
     """
   end
 
@@ -92,6 +95,40 @@ defmodule Cinder.Renderers.BulkActions do
   end
 
   defp has_label?(slot), do: Map.has_key?(slot, :label) and slot[:label] != nil
+
+  defp action_click(%{confirmation: :slot}, index, target) do
+    JS.push("bulk_action_prepare", value: %{index: index}, target: target)
+  end
+
+  defp action_click(_slot, index, target) do
+    JS.push("bulk_action_execute", value: %{index: index}, target: target)
+  end
+
+  defp confirmation_message(%{confirm: confirm}, count) when is_binary(confirm) do
+    interpolate_text(confirm, count)
+  end
+
+  defp confirmation_message(_slot, _count), do: nil
+
+  defp confirmation_slot_open?(assigns) do
+    is_integer(Map.get(assigns, :pending_bulk_action)) and
+      Map.get(assigns, :bulk_action_confirmation_slot, []) != []
+  end
+
+  defp confirmation_context(assigns) do
+    index = assigns.pending_bulk_action
+    slot = Enum.at(assigns.slots, index)
+
+    %{
+      selected_ids: assigns.selected_ids,
+      selected_count: assigns.selected_count,
+      action: slot[:action],
+      data: Map.get(assigns, :bulk_action_confirmation_data),
+      error: Map.get(assigns, :bulk_action_confirmation_error),
+      confirm: JS.push("bulk_action_execute", value: %{index: index}, target: assigns.myself),
+      cancel: JS.push("bulk_action_cancel", target: assigns.myself)
+    }
+  end
 
   defp variant_class(theme, :primary), do: theme.button_primary_class
   defp variant_class(theme, :secondary), do: theme.button_secondary_class

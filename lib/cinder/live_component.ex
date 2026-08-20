@@ -433,6 +433,43 @@ defmodule Cinder.LiveComponent do
   end
 
   @impl true
+  def handle_event("bulk_action_prepare", %{"index" => index}, socket) do
+    slots = socket.assigns[:bulk_action_slots] || []
+
+    if slot = Enum.at(slots, index) do
+      context = %{
+        selected_ids: socket.assigns.selected_ids,
+        selected_count: MapSet.size(socket.assigns.selected_ids),
+        action: slot[:action]
+      }
+
+      {confirmation_data, confirmation_error} =
+        case Cinder.BulkActionConfirmation.prepare(slot[:prepare_confirmation], context) do
+          {:ok, data} -> {data, nil}
+          {:error, reason} -> {nil, reason}
+        end
+
+      {:noreply,
+       socket
+       |> assign(:pending_bulk_action, index)
+       |> assign(:bulk_action_confirmation_data, confirmation_data)
+       |> assign(:bulk_action_confirmation_error, confirmation_error)}
+    else
+      Logger.warning("Cinder: Bulk action slot not found at index #{index}")
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("bulk_action_cancel", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:pending_bulk_action, nil)
+     |> assign(:bulk_action_confirmation_data, nil)
+     |> assign(:bulk_action_confirmation_error, nil)}
+  end
+
+  @impl true
   def handle_event("filter_change", params, socket) do
     query_columns = Map.get(socket.assigns, :query_columns, socket.assigns.columns)
 
@@ -530,6 +567,9 @@ defmodule Cinder.LiveComponent do
 
     socket =
       socket
+      |> assign(:pending_bulk_action, nil)
+      |> assign(:bulk_action_confirmation_data, nil)
+      |> assign(:bulk_action_confirmation_error, nil)
       |> assign(:selected_ids, MapSet.new())
       |> notify_selection_change(:clear)
       |> load_data()
@@ -552,6 +592,8 @@ defmodule Cinder.LiveComponent do
 
   defp handle_bulk_action_error(slot, socket, reason) do
     Logger.error("Cinder: Bulk action failed: #{inspect(reason)}")
+
+    socket = assign(socket, :bulk_action_confirmation_error, reason)
 
     if event_name = slot[:on_error] do
       send(
@@ -871,6 +913,10 @@ defmodule Cinder.LiveComponent do
     |> assign(:sort_mode, assigns[:sort_mode] || :additive)
     # Bulk actions
     |> assign_new(:bulk_action_slots, fn -> [] end)
+    |> assign_new(:bulk_action_confirmation_slot, fn -> [] end)
+    |> assign_new(:pending_bulk_action, fn -> nil end)
+    |> assign_new(:bulk_action_confirmation_data, fn -> nil end)
+    |> assign_new(:bulk_action_confirmation_error, fn -> nil end)
   end
 
   defp assign_column_definitions(socket) do

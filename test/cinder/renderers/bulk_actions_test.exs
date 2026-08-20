@@ -182,5 +182,51 @@ defmodule Cinder.Renderers.BulkActionsTest do
 
       assert html =~ ~s(data-confirm="Delete 2 items?")
     end
+
+    test "prepares a custom confirmation instead of using data-confirm" do
+      assigns = %{
+        selectable: true,
+        selected_ids: MapSet.new(["1", "2"]),
+        bulk_action_slots: [
+          %{action: :delete, label: "Delete", confirmation: :slot}
+        ],
+        bulk_action_confirmation_slot: [],
+        pending_bulk_action: nil,
+        theme: @theme,
+        myself: %Phoenix.LiveComponent.CID{cid: 1}
+      }
+
+      html = render_component(&BulkActions.render/1, assigns)
+
+      assert html =~ "bulk_action_prepare"
+      refute html =~ "data-confirm="
+      refute html =~ "bulk_action_execute"
+    end
+
+    test "renders the custom confirmation slot with action context" do
+      assigns = %{
+        selectable: true,
+        selected_ids: MapSet.new(["1", "2"]),
+        bulk_action_slots: [
+          %{action: :delete, label: "Delete", confirmation: :slot}
+        ],
+        bulk_action_confirmation_slot: [
+          %{
+            inner_block: fn _assigns, context ->
+              "Confirm #{context.selected_count} for #{context.action}: #{context.data} / #{context.error}"
+            end
+          }
+        ],
+        pending_bulk_action: 0,
+        bulk_action_confirmation_data: "prepared",
+        bulk_action_confirmation_error: "failed",
+        theme: @theme,
+        myself: %Phoenix.LiveComponent.CID{cid: 1}
+      }
+
+      html = render_component(&BulkActions.render/1, assigns)
+
+      assert html =~ "Confirm 2 for delete: prepared / failed"
+    end
   end
 end

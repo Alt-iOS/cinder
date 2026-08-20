@@ -76,6 +76,10 @@ defmodule Cinder.Renderers.List do
         selectable={@selectable}
         selected_ids={@selected_ids}
         bulk_action_slots={@bulk_action_slots}
+        bulk_action_confirmation_slot={Map.get(assigns, :bulk_action_confirmation_slot, [])}
+        pending_bulk_action={Map.get(assigns, :pending_bulk_action)}
+        bulk_action_confirmation_data={Map.get(assigns, :bulk_action_confirmation_data)}
+        bulk_action_confirmation_error={Map.get(assigns, :bulk_action_confirmation_error)}
         theme={@theme}
         myself={@myself}
       />
