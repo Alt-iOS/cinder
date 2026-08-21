@@ -573,6 +573,7 @@ defmodule Cinder.LiveComponent do
     socket =
       socket
       |> assign(:selected_ids, MapSet.new())
+      |> invalidate_selection_scope()
       |> notify_selection_change(:clear)
       |> load_data()
 

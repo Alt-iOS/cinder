@@ -23,10 +23,7 @@ defmodule Cinder.Renderers.SelectAll do
 
     assigns =
       assigns
-      |> assign(
-        :disabled,
-        assigns.loading or (not is_nil(assigns.scope_ids) and MapSet.size(selection_ids) == 0)
-      )
+      |> assign(:disabled, assigns.loading or MapSet.size(selection_ids) == 0)
       |> assign(:label, dgettext("cinder", "Select all filtered items"))
       |> assign(:state, state)
 
