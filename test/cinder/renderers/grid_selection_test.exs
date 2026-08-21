@@ -56,6 +56,13 @@ defmodule Cinder.Renderers.GridSelectionTest do
   end
 
   describe "grid selection rendering" do
+    test "renders a filtered-query select-all control" do
+      html = render_component(&GridRenderer.render/1, Map.put(base_assigns(), :selectable, true))
+
+      assert html =~ ~s(phx-click="toggle_select_all")
+      assert html =~ "Select all filtered items"
+    end
+
     test "renders overlay checkbox with theme classes when selectable=true" do
       assigns =
         base_assigns()

@@ -55,6 +55,13 @@ defmodule Cinder.Renderers.ListSelectionTest do
   end
 
   describe "list selection rendering" do
+    test "renders a filtered-query select-all control" do
+      html = render_component(&ListRenderer.render/1, Map.put(base_assigns(), :selectable, true))
+
+      assert html =~ ~s(phx-click="toggle_select_all")
+      assert html =~ "Select all filtered items"
+    end
+
     test "renders leading checkbox with theme classes when selectable=true" do
       assigns =
         base_assigns()

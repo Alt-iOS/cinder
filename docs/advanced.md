@@ -242,11 +242,35 @@ end
 
 The `*_if_visible` variants never call your function if the item isn't displayed, avoiding wasted database calls.
 
+This also works with infinite collections backed by LiveView streams. Streams do
+not retain rendered records in the LiveView process, so use the raw-record forms
+shown above. Cinder checks visibility against its bounded ID/cursor metadata,
+preserves the existing cursor and item number, and streams the transformed record
+to the browser without adding it to socket assigns. ID-only update calls are a
+safe no-op for infinite collections because there is no retained record to pass
+to the callback.
+
+For Ash notifications, subscribe in the parent LiveView and pass the notification's
+record to `update_if_visible/4`. Cinder intentionally does not prescribe a PubSub
+topic or notification envelope:
+
+```elixir
+def handle_info(%Ash.Notifier.Notification{data: user, action: %{type: :update}}, socket) do
+  {:noreply, update_if_visible(socket, "users-table", user, & &1)}
+end
+```
+
+Use `refresh_table/2` for create/destroy notifications and for updates that can
+change filters, sorting, keyset position, derived values, or numbering. In
+infinite mode, refresh clears the current client stream and requeries only the
+first bounded window; it does not load the entire result set into server memory.
+
 #### Caveats
 
 - These functions modify in-memory data only. Computed fields, aggregates, and calculations from the database will NOT be recalculated.
 - For changes that affect derived data, use `refresh_table/2` instead.
 - If the item is not found in the current page, the update is silently ignored.
+- Infinite stream transforms must preserve the collection's configured ID field.
 
 ## Loading, Empty & Error States
 
@@ -393,6 +417,19 @@ Use `query_opts` to load only needed data:
 >
   ...
 </Cinder.collection>
+
+<!-- Infinite scrolling with keyset batches -->
+<Cinder.collection
+  resource={MyApp.User}
+  actor={@current_user}
+  pagination={:infinite}
+  page_size={25}
+  window_size={75}
+  overscan={1}
+  show_item_numbers
+>
+  ...
+</Cinder.collection>
 ```
 
 **Global Default Page Size:**
@@ -409,12 +446,42 @@ config :cinder, default_page_size: [default: 25, options: [10, 25, 50, 100]]
 
 Individual collections can still override with the `page_size` attribute.
 
-**Keyset vs Offset Pagination:**
+**Pagination Modes:**
 
 - **Offset** (default): Traditional page numbers, allows jumping to any page. Can be slow on large datasets.
-- **Keyset**: Cursor-based prev/next navigation. Much faster on large datasets but cannot jump to arbitrary pages.
+- **Keyset**: Cursor-based previous/next navigation. Much faster on large datasets but cannot jump to a page whose cursor has not been visited. Cinder displays the sequential current page number and tracks record numbers so both remain meaningful while navigating in either direction.
+- **Infinite**: Streams unique keyset batches into the browser as an upcoming sentinel enters a one-viewport prefetch margin, so loading begins before the user reaches the rendered edge. Its footer shows only the current loading, retry, or end-of-list status; it does not render the ordinary pagination range or page-size selector. A “Load more” button remains available as an accessible fallback. The records themselves are released from LiveView socket state after render, and `window_size` bounds the records retained in the browser DOM; advancing past that window exposes a “Load previous” sentinel. Loading and retry states do not hide the retained window, and the end state cannot request another batch. Filtering, sorting, page-size changes, and refresh restart from the first batch.
 
-Use keyset pagination when you have large tables (10k+ rows) where offset queries become slow.
+For infinite pagination, `page_size` remains the Ash query batch size. `overscan` controls how many additional batches are prefetched (default `1`). `window_size` controls the client-side stream window and is rounded up to a whole number of batches; by default it is `page_size * (1 + 2 * overscan)`. For example, `page_size={25}`, `overscan={1}`, and `window_size={75}` load 25 records per query, prefetch one batch, and retain at most 75 rendered records. Cinder keeps cursor, page, ID, and selection metadata for the retained window, not the full record structs.
+
+Infinite collections use Cinder's LiveView hook to synchronize selection styling on records that the server has already released. Alias Cinder's shipped hook module in your asset bundler and include it in your `LiveSocket` hook registry. For example, with Vite:
+
+```javascript
+// vite.config.mjs
+import { fileURLToPath, URL } from "node:url"
+
+resolve: {
+  alias: {
+    cinder_hooks: fileURLToPath(
+      new URL(
+        "../deps/cinder/priv/static/cinder_hooks.js",
+        import.meta.url
+      )
+    )
+  }
+}
+
+// app.js
+import { hooks as cinderHooks } from "cinder_hooks"
+
+const liveSocket = new LiveSocket("/live", Socket, {
+  hooks: { ...cinderHooks, ...applicationHooks }
+})
+```
+
+Set `show_item_numbers` to render those stable numbers as a table column or a list/grid prefix. The `data-item-number` attribute is present on rendered items even when the visible number is disabled.
+
+Use keyset or infinite pagination when you have large collections (10k+ rows) where offset queries become slow.
 
 **Important:** Ensure your Ash action has pagination configured to prevent loading all records into memory:
 
@@ -512,6 +579,26 @@ checkbox so it can still be deselected. The predicate is also enforced
 server-side, so tampering with the disabled checkboxes in the browser has no
 effect.
 
+### Selecting All Filtered Records
+
+Every selectable table, grid, and list renders a select-all control. It selects
+every selectable record matched by the collection's current query, filters, and
+search—not only the rendered page. The lookup runs asynchronously and uses the
+same actor, tenant, scope, action, and query options as the collection.
+
+Selected IDs are stored in a `MapSet`, preventing duplicates and allowing bulk
+actions to operate on the complete filtered selection. Pagination and sorting
+preserve the selection. Changing the query, filters, or search invalidates the
+cached select-all scope so the next click evaluates the new result set.
+
+Before a complete filtered scope has been loaded, the checkbox reflects the
+currently rendered page. After select-all completes, unchecked, indeterminate,
+and checked describe the complete filtered scope. While either collection data
+or the select-all query is loading, the control is disabled.
+
+The control inherits `select_all_container_class`, `selection_checkbox_class`,
+and `selection_indeterminate_class` from the active Cinder theme.
+
 ```heex
 <!-- Only active users can be selected -->
 <Cinder.collection
@@ -601,6 +688,79 @@ Add `confirm` to show a browser confirmation dialog. Use `{count}` to interpolat
   Delete Selected
 </:bulk_action>
 ```
+
+For an application-defined confirmation UI, set `confirmation={:slot}` and provide a
+`bulk_action_confirmation` slot. Preparation runs asynchronously. The slot is always
+rendered so applications can choose server-controlled or immediate client-controlled
+opening.
+
+```heex
+<Cinder.collection resource={MyApp.User} actor={@current_user} selectable>
+  <:col :let={user} field="name">{user.name}</:col>
+
+  <:bulk_action
+    action={:destroy}
+    confirmation={:slot}
+    prepare_confirmation={fn context -> MyApp.Users.labels(context.selected_ids) end}
+    :let={action}
+  >
+    <button type="button" phx-click={action.prepare}>
+      Delete
+    </button>
+  </:bulk_action>
+
+  <:bulk_action_confirmation :let={confirmation}>
+    <p :if={confirmation.active? and not confirmation.ready? and is_nil(confirmation.error)}>
+      Loading selected users…
+    </p>
+    <p :if={confirmation.error and not confirmation.ready?}>
+      The selected users could not be prepared for deletion.
+    </p>
+    <.modal
+      id="confirm-bulk-delete"
+      open={confirmation.ready?}
+      on_cancel={confirmation.cancel}
+    >
+      <p>Delete {confirmation.selected_count} selected users?</p>
+      <ul :if={confirmation.data}><li :for={label <- confirmation.data}>{label}</li></ul>
+      <p :if={confirmation.error}>The users could not be deleted.</p>
+      <button type="button" phx-click={confirmation.cancel}>Cancel</button>
+      <button type="button" disabled={not confirmation.ready?} phx-click={confirmation.confirm}>
+        Delete
+      </button>
+    </.modal>
+  </:bulk_action_confirmation>
+</Cinder.collection>
+```
+
+The bulk action context exposes `prepare`, which pushes preparation to Cinder and can
+be composed with any client-side `Phoenix.LiveView.JS` command. Applications may show
+a preparation surface immediately, but should derive the final confirmation's open
+state from `ready?` when it must open only after successful preparation.
+
+`prepare_confirmation` receives a map containing `selected_ids`, `selected_count`,
+and `action`. It may return `{:ok, data}`, `{:error, reason}`, `:ok` (equivalent to
+`{:ok, nil}`), or a plain value (equivalent to `{:ok, value}`). Raised exceptions are
+exposed as errors. Preparation runs asynchronously, so the selected IDs are
+snapshotted before the callback starts.
+
+Cinder accepts only one running preparation attempt per action slot. Repeated prepare
+events for that attempt are ignored. Cancelling invalidates the attempt, so a late
+result cannot overwrite a later attempt for the same action.
+
+The confirmation context contains `active?`, `ready?`, `selected_ids`,
+`selected_count`, `action`, `data`, `error`, `confirm`, and `cancel`. Both `confirm`
+and `cancel` are always valid commands, including while preparation is running. The
+application owns their presentation and may compose them with other
+`Phoenix.LiveView.JS` commands. `active?` becomes true when preparation starts and
+`ready?` becomes true after successful preparation. Cinder ignores confirmation
+attempts until `ready?` is true. When preparation or execution fails, `error` contains
+the reason; execution errors do not discard prepared `data`. Cinder clears the
+confirmation after successful execution or cancellation.
+
+For server-controlled opening, use a labeled bulk action. Cinder's themed button
+pushes preparation automatically; bind the modal's `open` attribute to
+`confirmation.active?`.
 
 ### Success and Error Callbacks
 

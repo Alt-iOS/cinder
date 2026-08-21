@@ -133,7 +133,7 @@ defmodule Cinder.QueryBuilder do
   The `page` value depends on the pagination mode and action configuration:
 
   - **Offset pagination** (`:pagination_mode` is `:offset`, default): Returns `Ash.Page.Offset` struct
-  - **Keyset pagination** (`:pagination_mode` is `:keyset`): Returns `Ash.Page.Keyset` struct
+  - **Keyset pagination** (`:pagination_mode` is `:keyset` or `:infinite`): Returns `Ash.Page.Keyset` struct
   - **Non-paginated actions**: Returns `%{results: list()}` map (not a struct)
 
   All return types support accessing results via `page.results`.
@@ -177,7 +177,7 @@ defmodule Cinder.QueryBuilder do
       case action_supports_pagination?(prepared_query) do
         true ->
           case pagination_mode do
-            :keyset ->
+            mode when mode in [:keyset, :infinite] ->
               execute_with_keyset_pagination(
                 prepared_query,
                 ash_opts,
@@ -218,6 +218,16 @@ defmodule Cinder.QueryBuilder do
         )
 
         {:error, error}
+    end
+  end
+
+  @doc false
+  def read_all(%Ash.Query{} = prepared_query, options) do
+    prepared_query
+    |> Ash.read(Keyword.put(build_read_opts(options), :page, false))
+    |> case do
+      {:ok, results} when is_list(results) -> {:ok, results}
+      {:error, _reason} = error -> error
     end
   end
 

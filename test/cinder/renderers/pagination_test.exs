@@ -75,4 +75,76 @@ defmodule Cinder.Renderers.PaginationTest do
       assert html =~ ~s(#users-table-page-size-options)
     end
   end
+
+  describe "keyset numbering" do
+    test "renders a meaningful ordinal range on later pages" do
+      assigns =
+        base_assigns("keyset")
+        |> Map.merge(%{pagination_mode: :keyset, current_page: 3})
+
+      html = render_component(&Pagination.render/1, assigns)
+
+      assert html =~ "Page 3"
+      assert html =~ "showing 21-22 of 100"
+    end
+  end
+
+  describe "infinite pagination" do
+    test "renders an ahead-of-viewport sentinel while more results remain" do
+      assigns =
+        base_assigns("items")
+        |> Map.merge(%{
+          pagination_mode: :infinite,
+          current_page: 1,
+          loaded_count: 10,
+          loading: false,
+          error: false
+        })
+
+      html = render_component(&Pagination.render/1, assigns)
+
+      assert html =~ ~s(data-pagination-mode="infinite")
+      assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
+      assert html =~ ~s(data-infinite-prefetch-distance="viewport")
+      refute html =~ ~s(phx-viewport-bottom="load_more")
+      refute html =~ ~s(id="items-page-size-options")
+      refute html =~ "showing 1-10 of 100"
+      assert html =~ ~s(class="pagination-info")
+      assert html =~ ~s(data-key="pagination_info_class")
+    end
+
+    test "renders loading, retry, and end states without another sentinel" do
+      loading =
+        base_assigns("items")
+        |> Map.merge(%{pagination_mode: :infinite, loaded_count: 10, loading: true, error: false})
+
+      assert render_component(&Pagination.render/1, loading) =~
+               ~s(data-pagination-state="loading")
+
+      failed = %{loading | loading: false, error: true}
+      assert render_component(&Pagination.render/1, failed) =~ ~s(phx-click="retry_load_more")
+
+      ended =
+        failed
+        |> Map.merge(%{error: false, page: %{failed.page | more?: false}})
+
+      end_html = render_component(&Pagination.render/1, ended)
+      assert end_html =~ ~s(data-pagination-state="end")
+      assert end_html =~ "You have reached the end of this list"
+      assert end_html =~ ~s(class="pagination-info")
+      assert end_html =~ ~s(data-key="pagination_info_class")
+      refute end_html =~ ~s(id="items-page-size-options")
+      refute end_html =~ "showing"
+      refute end_html =~ ~s(phx-hook="CinderInfiniteSentinel")
+    end
+  end
+
+  describe "item numbering" do
+    test "numbers keyset pages and accumulated infinite results" do
+      page = %{limit: 10}
+
+      assert Cinder.Renderers.Helpers.item_number(0, :keyset, 3, page) == 21
+      assert Cinder.Renderers.Helpers.item_number(24, :infinite, 3, page) == 25
+    end
+  end
 end

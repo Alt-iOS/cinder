@@ -2,9 +2,10 @@ defmodule Cinder.Renderers.Pagination do
   @moduledoc """
   Shared pagination component used by Table, List, and Grid renderers.
 
-  Supports two pagination modes:
+  Supports three pagination modes:
   - `Ash.Page.Offset` - Traditional page numbers with jump-to-page
   - `Ash.Page.Keyset` - Cursor-based with prev/next navigation (faster for large datasets)
+  - Infinite scrolling - Cursor-based batches appended as the viewport reaches the sentinel
 
   Uses `AshPhoenix.LiveView` helpers for working with Ash.Page structs directly.
   """
@@ -46,6 +47,7 @@ defmodule Cinder.Renderers.Pagination do
 
       case pagination_mode do
         :keyset -> render_keyset(assigns)
+        :infinite -> render_infinite(assigns)
         :offset -> render_offset(assigns)
       end
     else
@@ -186,19 +188,28 @@ defmodule Cinder.Renderers.Pagination do
 
     has_prev = has_previous_keyset_page?(page)
     has_next = has_next_keyset_page?(page)
+    page_number = Map.get(assigns, :current_page, 1)
+    start_index = if page.count > 0, do: (page_number - 1) * page.limit + 1, else: 0
+    end_index = min(start_index + length(page.results) - 1, page.count)
 
     assigns =
       assigns
       |> assign(:total_count, page.count)
       |> assign(:has_prev, has_prev)
       |> assign(:has_next, has_next)
+      |> assign(:page_number, page_number)
+      |> assign(:start_index, start_index)
+      |> assign(:end_index, max(end_index, 0))
 
     ~H"""
     <div class={@theme.pagination_wrapper_class} data-key="pagination_wrapper_class">
       <div class={@theme.pagination_container_class} data-key="pagination_container_class">
-      <!-- Left side: Count info -->
+      <!-- Left side: Count and stable ordinal range -->
       <div class={@theme.pagination_info_class} data-key="pagination_info_class">
-        {dgettext("cinder", "%{total} items", total: @total_count)}
+        {dgettext("cinder", "Page %{current}", current: @page_number)}
+        <span class={@theme.pagination_count_class} data-key="pagination_count_class">
+          ({dgettext("cinder", "showing %{start}-%{end} of %{total}", start: @start_index, end: @end_index, total: @total_count)})
+        </span>
       </div>
 
       <!-- Right side: Page size selector and navigation -->
@@ -235,6 +246,78 @@ defmodule Cinder.Renderers.Pagination do
           </button>
         </div>
       </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_infinite(assigns) do
+    page = assigns.page
+    has_next = Map.get(assigns, :has_next, has_next_keyset_page?(page))
+
+    assigns =
+      assigns
+      |> assign(:error, Map.get(assigns, :error, false))
+      |> assign(:has_next, has_next)
+      |> assign(:loading, Map.get(assigns, :loading, false))
+
+    ~H"""
+    <div
+      class={@theme.pagination_wrapper_class}
+      data-key="pagination_wrapper_class"
+      data-pagination-mode="infinite"
+    >
+      <div class={@theme.pagination_container_class} data-key="pagination_container_class">
+        <div
+          :if={@loading}
+          class={@theme.pagination_info_class}
+          data-key="pagination_info_class"
+          data-pagination-state="loading"
+          role="status"
+        >
+          {dgettext("cinder", "Loading more items...")}
+        </div>
+
+        <button
+          :if={@error}
+          type="button"
+          class={@theme.pagination_button_class}
+          data-pagination-state="error"
+          phx-click="retry_load_more"
+          phx-target={@myself}
+        >
+          {dgettext("cinder", "Loading failed. Try again")}
+        </button>
+
+        <div
+          :if={@has_next and not @loading and not @error}
+          id={"#{@id}-infinite-sentinel"}
+          class={@theme.pagination_info_class}
+          data-key="pagination_info_class"
+          data-pagination-state="ready"
+          data-infinite-prefetch-distance="viewport"
+          phx-hook="CinderInfiniteSentinel"
+          phx-target={@myself}
+        >
+          <button
+            type="button"
+            class={@theme.pagination_button_class}
+            phx-click="load_more"
+            phx-target={@myself}
+          >
+            {dgettext("cinder", "Load more")}
+          </button>
+        </div>
+
+        <div
+          :if={not @has_next and not @loading and not @error}
+          class={@theme.pagination_info_class}
+          data-key="pagination_info_class"
+          data-pagination-state="end"
+          role="status"
+        >
+          {dgettext("cinder", "You have reached the end of this list")}
+        </div>
       </div>
     </div>
     """
