@@ -440,6 +440,26 @@ defmodule Cinder.LiveComponent do
   end
 
   @impl true
+  def handle_event("bulk_action_confirm", _params, socket) do
+    slots = socket.assigns[:bulk_action_slots] || []
+
+    case socket.assigns[:bulk_action_confirmation] do
+      %{index: index, selected_ids: selected_ids, data: _data} ->
+        case Enum.at(slots, index) do
+          nil ->
+            Logger.warning("Cinder: Bulk action slot not found at index #{index}")
+            {:noreply, socket}
+
+          slot ->
+            execute_bulk_action(slot, selected_ids, socket)
+        end
+
+      _not_ready ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_event("bulk_action_prepare", %{"index" => index}, socket) do
     slots = socket.assigns[:bulk_action_slots] || []
 

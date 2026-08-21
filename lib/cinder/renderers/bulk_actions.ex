@@ -45,7 +45,7 @@ defmodule Cinder.Renderers.BulkActions do
     <div class={@theme.bulk_actions_container_class} data-key="bulk_actions_container_class">
       <%= for {slot, index} <- Enum.with_index(@slots) do %>
         <span
-          phx-click={action_click(slot, index, @myself)}
+          phx-click={wrapper_click(slot, index, @myself)}
           data-confirm={confirmation_message(slot, @selected_count)}
           class="contents"
         >
@@ -96,6 +96,12 @@ defmodule Cinder.Renderers.BulkActions do
 
   defp has_label?(slot), do: Map.has_key?(slot, :label) and slot[:label] != nil
 
+  defp wrapper_click(%{confirmation: :slot} = slot, index, target) do
+    if has_label?(slot), do: action_click(slot, index, target)
+  end
+
+  defp wrapper_click(slot, index, target), do: action_click(slot, index, target)
+
   defp action_click(%{confirmation: :slot}, index, target) do
     JS.push("bulk_action_prepare", value: %{index: index}, target: target)
   end
@@ -137,19 +143,15 @@ defmodule Cinder.Renderers.BulkActions do
     prepared? = confirmation && Map.has_key?(confirmation, :data)
 
     %{
+      active?: not is_nil(confirmation),
+      ready?: !!prepared?,
       selected_ids: selected_ids,
       selected_count: MapSet.size(selected_ids),
       action: slot && slot[:action],
       data: confirmation && Map.get(confirmation, :data),
       error: confirmation && Map.get(confirmation, :error),
-      confirm:
-        if(prepared?,
-          do: JS.push("bulk_action_execute", value: %{index: index}, target: assigns.myself)
-        ),
-      cancel:
-        if(confirmation,
-          do: JS.push("bulk_action_cancel", target: assigns.myself)
-        )
+      confirm: JS.push("bulk_action_confirm", target: assigns.myself),
+      cancel: JS.push("bulk_action_cancel", target: assigns.myself)
     }
   end
 

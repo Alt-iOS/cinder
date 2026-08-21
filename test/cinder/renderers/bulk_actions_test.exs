@@ -134,6 +134,30 @@ defmodule Cinder.Renderers.BulkActionsTest do
       # Should not render themed button classes
       refute html =~ "btn-primary"
     end
+
+    test "lets custom slot confirmation content own the preparation click" do
+      assigns = %{
+        selectable: true,
+        selected_ids: MapSet.new(["1"]),
+        bulk_action_slots: [
+          %{
+            action: :delete,
+            confirmation: :slot,
+            inner_block: fn _assigns, context ->
+              "prepare=#{not is_nil(context.prepare)}"
+            end
+          }
+        ],
+        theme: @theme,
+        myself: %Phoenix.LiveComponent.CID{cid: 1}
+      }
+
+      html = render_component(&BulkActions.render/1, assigns)
+
+      assert html =~ "prepare=true"
+      refute html =~ "phx-click="
+      refute html =~ "data-confirm="
+    end
   end
 
   describe "render conditions" do
@@ -213,7 +237,7 @@ defmodule Cinder.Renderers.BulkActionsTest do
         bulk_action_confirmation_slot: [
           %{
             inner_block: fn _assigns, context ->
-              "Confirm #{context.selected_count} for #{context.action}: #{context.data} / #{context.error}; confirm=#{not is_nil(context.confirm)} cancel=#{not is_nil(context.cancel)}"
+              "Confirm #{context.selected_count} for #{context.action}: #{context.data} / #{context.error}; active=#{context.active?} ready=#{context.ready?} confirm=#{not is_nil(context.confirm)} cancel=#{not is_nil(context.cancel)}"
             end
           }
         ],
@@ -229,7 +253,8 @@ defmodule Cinder.Renderers.BulkActionsTest do
 
       html = render_component(&BulkActions.render/1, assigns)
 
-      assert html =~ "Confirm 2 for delete: prepared / failed; confirm=true cancel=true"
+      assert html =~
+               "Confirm 2 for delete: prepared / failed; active=true ready=true confirm=true cancel=true"
     end
 
     test "renders the custom confirmation slot while inactive" do
@@ -242,7 +267,7 @@ defmodule Cinder.Renderers.BulkActionsTest do
         bulk_action_confirmation_slot: [
           %{
             inner_block: fn _assigns, context ->
-              "data=#{inspect(context.data)} error=#{inspect(context.error)} confirm=#{inspect(context.confirm)} cancel=#{inspect(context.cancel)}"
+              "active=#{context.active?} ready=#{context.ready?} data=#{inspect(context.data)} error=#{inspect(context.error)} confirm=#{not is_nil(context.confirm)} cancel=#{not is_nil(context.cancel)}"
             end
           }
         ],
@@ -253,9 +278,8 @@ defmodule Cinder.Renderers.BulkActionsTest do
 
       html = render_component(&BulkActions.render/1, assigns)
 
-      assert html =~ "data=nil error=nil confirm=nil cancel=nil"
-      refute html =~ "bulk_action_execute"
-      refute html =~ "bulk_action_cancel"
+      assert html =~
+               "active=false ready=false data=nil error=nil confirm=true cancel=true"
     end
   end
 end

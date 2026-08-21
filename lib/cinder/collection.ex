@@ -359,7 +359,7 @@ defmodule Cinder.Collection do
   slot(:bulk_action_confirmation,
     required: false,
     doc:
-      "Custom confirmation content for bulk actions using confirmation={:slot}. Receives selected_ids, selected_count, action, data, error, confirm, and cancel via :let."
+      "Custom confirmation content for bulk actions using confirmation={:slot}. Receives active?, ready?, selected_ids, selected_count, action, data, error, confirm, and cancel via :let."
   )
 
   slot(:controls,

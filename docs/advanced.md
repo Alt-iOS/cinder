@@ -627,14 +627,13 @@ opening.
   <:bulk_action_confirmation :let={confirmation}>
     <.modal
       id="confirm-bulk-delete"
-      open={not is_nil(confirmation.cancel)}
+      open={confirmation.active?}
       on_cancel={confirmation.cancel}
     >
       <p>Delete {confirmation.selected_count} selected users?</p>
       <p
         :if={
-          not is_nil(confirmation.cancel) and is_nil(confirmation.confirm) and
-            is_nil(confirmation.error)
+          confirmation.active? and not confirmation.ready? and is_nil(confirmation.error)
         }
       >
         Loading selected users…
@@ -642,7 +641,7 @@ opening.
       <ul :if={confirmation.data}><li :for={label <- confirmation.data}>{label}</li></ul>
       <p :if={confirmation.error}>The users could not be deleted.</p>
       <button type="button" phx-click={confirmation.cancel}>Cancel</button>
-      <button type="button" disabled={is_nil(confirmation.confirm)} phx-click={confirmation.confirm}>
+      <button type="button" disabled={not confirmation.ready?} phx-click={confirmation.confirm}>
         Delete
       </button>
     </.modal>
@@ -659,16 +658,19 @@ and `action`. It may return `{:ok, data}`, `{:error, reason}`, `:ok` (equivalent
 exposed as errors. Preparation runs asynchronously, so the selected IDs are
 snapshotted before the callback starts.
 
-The confirmation context contains `selected_ids`, `selected_count`, `action`, `data`,
-`error`, `confirm`, and `cancel`. Before preparation completes, `confirm` is `nil`.
-After a successful preparation it contains the command that executes the action.
-When preparation or execution fails, `error` contains the reason; execution errors
-do not discard prepared `data`. Cinder clears the confirmation after successful
-execution or cancellation.
+The confirmation context contains `active?`, `ready?`, `selected_ids`,
+`selected_count`, `action`, `data`, `error`, `confirm`, and `cancel`. Both `confirm`
+and `cancel` are always valid commands, including while preparation is running. The
+application owns their presentation and may compose them with other
+`Phoenix.LiveView.JS` commands. `active?` becomes true when preparation starts and
+`ready?` becomes true after successful preparation. Cinder ignores confirmation
+attempts until `ready?` is true. When preparation or execution fails, `error` contains
+the reason; execution errors do not discard prepared `data`. Cinder clears the
+confirmation after successful execution or cancellation.
 
 For server-controlled opening, use a labeled bulk action. Cinder's themed button
 pushes preparation automatically; bind the modal's `open` attribute to
-`not is_nil(confirmation.cancel)`.
+`confirmation.active?`.
 
 ### Success and Error Callbacks
 

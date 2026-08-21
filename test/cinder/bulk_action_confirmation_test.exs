@@ -136,6 +136,44 @@ defmodule Cinder.BulkActionConfirmationTest do
                socket.assigns.bulk_action_confirmation
     end
 
+    test "ignores preparation results after cancellation" do
+      socket = socket(%{bulk_action_confirmation: confirmation(:current)})
+
+      assert {:noreply, socket} =
+               LiveComponent.handle_event("bulk_action_cancel", %{}, socket)
+
+      assert {:noreply, socket} =
+               LiveComponent.handle_async(
+                 {:bulk_action_confirmation, 0},
+                 {:ok, {:ok, :late}},
+                 socket
+               )
+
+      assert socket.assigns.bulk_action_confirmation == nil
+    end
+
+    test "ignores confirmation before preparation succeeds" do
+      action = fn _query, _opts -> send(self(), :executed) end
+
+      socket =
+        socket(%{
+          query: SearchTestResource,
+          bulk_action_confirmation: %{
+            index: 0,
+            selected_ids: @context.selected_ids
+          },
+          bulk_action_slots: [%{action: action, confirmation: :slot}]
+        })
+
+      assert {:noreply, unchanged} =
+               LiveComponent.handle_event("bulk_action_confirm", %{}, socket)
+
+      assert unchanged.assigns.bulk_action_confirmation ==
+               socket.assigns.bulk_action_confirmation
+
+      refute_received :executed
+    end
+
     test "keeps confirmation open and exposes execution errors" do
       action = fn _query, _opts -> {:error, :not_allowed} end
 
@@ -149,7 +187,7 @@ defmodule Cinder.BulkActionConfirmationTest do
         })
 
       assert {:noreply, socket} =
-               LiveComponent.handle_event("bulk_action_execute", %{"index" => 0}, socket)
+               LiveComponent.handle_event("bulk_action_confirm", %{}, socket)
 
       assert socket.assigns.bulk_action_confirmation.index == 0
       assert socket.assigns.bulk_action_confirmation.data == :prepared
@@ -176,7 +214,7 @@ defmodule Cinder.BulkActionConfirmationTest do
         })
 
       assert {:noreply, socket} =
-               LiveComponent.handle_event("bulk_action_execute", %{"index" => 0}, socket)
+               LiveComponent.handle_event("bulk_action_confirm", %{}, socket)
 
       assert socket.assigns.bulk_action_confirmation == nil
       assert socket.assigns.selected_ids == MapSet.new()
