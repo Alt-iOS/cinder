@@ -593,6 +593,54 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       refute unchanged_socket.assigns.infinite_append?
     end
 
+    test "programmatic refresh resets and requeries the bounded infinite window" do
+      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
+      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
+      {:ok, socket} = LiveComponent.update(assigns, socket)
+
+      socket =
+        socket
+        |> Phoenix.LiveView.cancel_async(:load_data)
+        |> Phoenix.Component.assign(:current_page, 4)
+        |> Phoenix.Component.assign(:after_keyset, "last_cursor")
+        |> Phoenix.Component.assign(:first_keyset, "first_cursor")
+        |> Phoenix.Component.assign(:last_keyset, "last_cursor")
+        |> Phoenix.Component.assign(:infinite_append?, true)
+        |> Phoenix.Component.assign(:infinite_direction, :append)
+        |> Phoenix.Component.assign(:infinite_item_ids, MapSet.new(["1", "2"]))
+        |> Phoenix.Component.assign(:infinite_selectable_ids, MapSet.new(["1", "2"]))
+        |> Phoenix.Component.assign(:infinite_loaded_count, 2)
+        |> Phoenix.Component.assign(:infinite_range_start, 7)
+        |> Phoenix.Component.assign(:infinite_range_end, 8)
+        |> Phoenix.Component.assign(:infinite_pages, [
+          %{
+            page: 4,
+            first_keyset: "first_cursor",
+            last_keyset: "last_cursor",
+            ids: ["1", "2"],
+            selectable_ids: ["1", "2"],
+            items: []
+          }
+        ])
+
+      {:ok, refreshed_socket} = LiveComponent.update(%{refresh: true}, socket)
+
+      assert refreshed_socket.assigns.current_page == 1
+      assert refreshed_socket.assigns.after_keyset == nil
+      assert refreshed_socket.assigns.before_keyset == nil
+      assert refreshed_socket.assigns.first_keyset == nil
+      assert refreshed_socket.assigns.last_keyset == nil
+      assert refreshed_socket.assigns.infinite_pages == []
+      assert refreshed_socket.assigns.infinite_item_ids == MapSet.new()
+      assert refreshed_socket.assigns.infinite_selectable_ids == MapSet.new()
+      assert refreshed_socket.assigns.infinite_loaded_count == 0
+      assert refreshed_socket.assigns.infinite_range_start == 0
+      assert refreshed_socket.assigns.infinite_range_end == 0
+      assert refreshed_socket.assigns.loading
+      refute refreshed_socket.assigns.infinite_append?
+      assert refreshed_socket.assigns.infinite_direction == :reset
+    end
+
     test "an asynchronous infinite result retains only IDs and discards duplicate records" do
       assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
       {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})

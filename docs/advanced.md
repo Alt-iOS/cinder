@@ -241,11 +241,35 @@ end
 
 The `*_if_visible` variants never call your function if the item isn't displayed, avoiding wasted database calls.
 
+This also works with infinite collections backed by LiveView streams. Streams do
+not retain rendered records in the LiveView process, so use the raw-record forms
+shown above. Cinder checks visibility against its bounded ID/cursor metadata,
+preserves the existing cursor and item number, and streams the transformed record
+to the browser without adding it to socket assigns. ID-only update calls are a
+safe no-op for infinite collections because there is no retained record to pass
+to the callback.
+
+For Ash notifications, subscribe in the parent LiveView and pass the notification's
+record to `update_if_visible/4`. Cinder intentionally does not prescribe a PubSub
+topic or notification envelope:
+
+```elixir
+def handle_info(%Ash.Notifier.Notification{data: user, action: %{type: :update}}, socket) do
+  {:noreply, update_if_visible(socket, "users-table", user, & &1)}
+end
+```
+
+Use `refresh_table/2` for create/destroy notifications and for updates that can
+change filters, sorting, keyset position, derived values, or numbering. In
+infinite mode, refresh clears the current client stream and requeries only the
+first bounded window; it does not load the entire result set into server memory.
+
 #### Caveats
 
 - These functions modify in-memory data only. Computed fields, aggregates, and calculations from the database will NOT be recalculated.
 - For changes that affect derived data, use `refresh_table/2` instead.
 - If the item is not found in the current page, the update is silently ignored.
+- Infinite stream transforms must preserve the collection's configured ID field.
 
 ## Loading, Empty & Error States
 

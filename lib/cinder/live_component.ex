@@ -34,6 +34,7 @@ defmodule Cinder.LiveComponent do
       socket
       |> assign(Map.drop(assigns, [:refresh]))
       |> assign_defaults()
+      |> maybe_reset_infinite_pagination()
       |> ensure_infinite_stream()
       |> assign_column_definitions()
       |> load_data()
@@ -117,17 +118,21 @@ defmodule Cinder.LiveComponent do
   end
 
   defp do_update_item_if_visible(socket, id, raw_item, update_fn, id_field) do
-    data = socket.assigns.data || []
+    if infinite_mode?(socket) do
+      do_update_infinite_item_if_visible(socket, id, raw_item, update_fn, id_field)
+    else
+      data = socket.assigns.data || []
 
-    case Enum.find(data, &(Map.get(&1, id_field) == id)) do
-      nil ->
-        {:ok, socket}
+      case Enum.find(data, &(Map.get(&1, id_field) == id)) do
+        nil ->
+          {:ok, socket}
 
-      old_item ->
-        input = raw_item || old_item
-        updated = update_fn.(input)
-        updated_data = Enum.map(data, &if(Map.get(&1, id_field) == id, do: updated, else: &1))
-        {:ok, assign(socket, :data, updated_data)}
+        old_item ->
+          input = raw_item || old_item
+          updated = update_fn.(input)
+          updated_data = Enum.map(data, &if(Map.get(&1, id_field) == id, do: updated, else: &1))
+          {:ok, assign(socket, :data, updated_data)}
+      end
     end
   end
 
@@ -137,24 +142,119 @@ defmodule Cinder.LiveComponent do
   end
 
   defp do_update_items_if_visible(socket, items_by_id, ids, update_fn, id_field) do
-    data = socket.assigns.data || []
-    id_set = MapSet.new(ids)
-    visible_ids = data |> Enum.map(&Map.get(&1, id_field)) |> MapSet.new()
-    ids_to_update = MapSet.intersection(id_set, visible_ids)
+    if infinite_mode?(socket) do
+      do_update_infinite_items_if_visible(socket, items_by_id, ids, update_fn, id_field)
+    else
+      data = socket.assigns.data || []
+      id_set = MapSet.new(ids)
+      visible_ids = data |> Enum.map(&Map.get(&1, id_field)) |> MapSet.new()
+      ids_to_update = MapSet.intersection(id_set, visible_ids)
 
-    if MapSet.size(ids_to_update) == 0 do
+      if MapSet.size(ids_to_update) == 0 do
+        {:ok, socket}
+      else
+        input_items = get_input_items(data, items_by_id, ids_to_update, id_field)
+        updated_by_id = update_fn.(input_items) |> to_map_by_id(id_field)
+
+        updated_data =
+          Enum.map(data, fn item ->
+            id = Map.get(item, id_field)
+            Map.get(updated_by_id, id, item)
+          end)
+
+        {:ok, assign(socket, :data, updated_data)}
+      end
+    end
+  end
+
+  # Infinite collections intentionally retain only IDs, cursors, numbering and
+  # selection metadata on the server. A full notification record is therefore
+  # required for a targeted update; ID-only updates remain a safe no-op.
+  defp do_update_infinite_item_if_visible(socket, id, %{} = raw_item, update_fn, id_field) do
+    normalized_id = to_string(id)
+
+    if MapSet.member?(socket.assigns.infinite_item_ids, normalized_id) do
+      updated = update_fn.(raw_item)
+      {:ok, update_infinite_entries(socket, %{normalized_id => updated}, id_field)}
+    else
+      {:ok, socket}
+    end
+  end
+
+  defp do_update_infinite_item_if_visible(socket, _id, nil, _update_fn, _id_field),
+    do: {:ok, socket}
+
+  defp do_update_infinite_items_if_visible(socket, items_by_id, _ids, update_fn, id_field)
+       when is_map(items_by_id) do
+    raw_by_id = Map.new(items_by_id, fn {id, item} -> {to_string(id), item} end)
+
+    visible_items =
+      socket.assigns.infinite_pages
+      |> Enum.flat_map(& &1.items)
+      |> Enum.filter(&Map.has_key?(raw_by_id, &1.id))
+      |> Enum.map(&Map.fetch!(raw_by_id, &1.id))
+
+    if visible_items == [] do
       {:ok, socket}
     else
-      input_items = get_input_items(data, items_by_id, ids_to_update, id_field)
-      updated_by_id = update_fn.(input_items) |> to_map_by_id(id_field)
+      updated_by_id =
+        visible_items
+        |> update_fn.()
+        |> to_map_by_normalized_id(id_field)
 
-      updated_data =
-        Enum.map(data, fn item ->
-          id = Map.get(item, id_field)
-          Map.get(updated_by_id, id, item)
-        end)
+      {:ok, update_infinite_entries(socket, updated_by_id, id_field)}
+    end
+  end
 
-      {:ok, assign(socket, :data, updated_data)}
+  defp do_update_infinite_items_if_visible(socket, nil, _ids, _update_fn, _id_field),
+    do: {:ok, socket}
+
+  defp update_infinite_entries(socket, updated_by_id, id_field) do
+    selectable = socket.assigns.selectable
+
+    {pages, entries} =
+      Enum.map_reduce(socket.assigns.infinite_pages, [], fn page, entries ->
+        {items, entries} =
+          Enum.map_reduce(page.items, entries, fn item_meta, entries ->
+            case Map.fetch(updated_by_id, item_meta.id) do
+              {:ok, updated} ->
+                ensure_same_infinite_id!(updated, item_meta.id, id_field)
+                selectable? = Cinder.Selection.item_selectable?(selectable, updated)
+                item_meta = %{item_meta | selectable?: selectable?}
+
+                entry = %{
+                  record: updated,
+                  id: item_meta.id,
+                  number: item_meta.number,
+                  keyset: item_meta.keyset,
+                  selectable?: selectable?
+                }
+
+                {item_meta, [entry | entries]}
+
+              :error ->
+                {item_meta, entries}
+            end
+          end)
+
+        {refresh_infinite_page_meta(page, items), entries}
+      end)
+
+    selectable_ids =
+      pages
+      |> Enum.flat_map(& &1.selectable_ids)
+      |> MapSet.new()
+
+    socket
+    |> maybe_stream_items(Enum.reverse(entries), [])
+    |> assign(:infinite_pages, pages)
+    |> assign(:infinite_selectable_ids, selectable_ids)
+  end
+
+  defp ensure_same_infinite_id!(item, expected_id, id_field) do
+    if to_string(Map.get(item, id_field)) != expected_id do
+      raise ArgumentError,
+            "an infinite stream update must preserve the #{inspect(id_field)} field"
     end
   end
 
@@ -173,6 +273,14 @@ defmodule Cinder.LiveComponent do
   end
 
   defp to_map_by_id(items, _id_field) when is_map(items), do: items
+
+  defp to_map_by_normalized_id(items, id_field) when is_list(items) do
+    Map.new(items, &{to_string(Map.get(&1, id_field)), &1})
+  end
+
+  defp to_map_by_normalized_id(items, _id_field) when is_map(items) do
+    Map.new(items, fn {id, item} -> {to_string(id), item} end)
+  end
 
   @impl true
   def render(assigns) do
@@ -1038,6 +1146,13 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_append?, false)
     |> mark_infinite_reset()
   end
+
+  defp maybe_reset_infinite_pagination(socket) do
+    if infinite_mode?(socket), do: reset_infinite_pagination(socket), else: socket
+  end
+
+  defp infinite_mode?(socket),
+    do: Map.get(socket.assigns, :pagination_mode, :offset) == :infinite
 
   defp maybe_put_cursor(state, _key, nil), do: state
   defp maybe_put_cursor(state, key, cursor), do: Map.put(state, key, cursor)
