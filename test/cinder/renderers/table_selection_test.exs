@@ -129,7 +129,33 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*checked[^>]*phx-click="toggle_select_all_page"/
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
+    end
+
+    test "header checkbox exposes an indeterminate state when some visible items are selected" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          selectable: true,
+          selected_ids: MapSet.new(["user-1"]),
+          data: [%{id: "user-1", name: "Alice"}, %{id: "user-2", name: "Bob"}]
+        })
+
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      assert html =~ ~s(aria-checked="mixed")
+      assert html =~ ~s(data-selection-state="some")
+      assert html =~ ~r/\sdata-indeterminate(?:\s|>)/
+    end
+
+    test "header checkbox is disabled while loading stale page data" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{selectable: true, loading: true, data: [%{id: "user-1", name: "Alice"}]})
+
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select_all_page"/
     end
 
     test "row checkbox reflects selection state" do
@@ -198,7 +224,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*checked[^>]*phx-click="toggle_select_all_page"/
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
 
     test "header checkbox is unchecked when there are no selectable rows" do
@@ -213,7 +239,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      refute html =~ ~r/<input[^>]*checked[^>]*phx-click="toggle_select_all_page"/
+      refute html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
 
     test "applies selected styling only to selectable selected rows" do

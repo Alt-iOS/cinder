@@ -51,4 +51,34 @@ defmodule Cinder.Selection do
   def item_toggleable?(selectable, selected_ids, item, id_field) do
     item_selectable?(selectable, item) or item_selected?(selected_ids, item, id_field)
   end
+
+  @doc """
+  Returns the unique IDs of selectable items in the currently rendered batch.
+
+  The returned set intentionally describes only visible data. Selections from
+  other pages remain in `selected_ids`, but do not affect the visible
+  select-all control's checked or indeterminate state.
+  """
+  def page_ids(data, id_field, selectable) when is_list(data) do
+    data
+    |> Enum.filter(&item_selectable?(selectable, &1))
+    |> Enum.map(&to_string(Map.get(&1, id_field)))
+    |> MapSet.new()
+  end
+
+  def page_ids(_data, _id_field, _selectable), do: MapSet.new()
+
+  @doc """
+  Returns `:none`, `:some`, or `:all` for the selectable visible items.
+  """
+  def page_state(selected_ids, data, id_field, selectable) do
+    page_ids = page_ids(data, id_field, selectable)
+    selected_page_ids = MapSet.intersection(page_ids, selected_ids)
+
+    cond do
+      MapSet.size(selected_page_ids) == 0 -> :none
+      MapSet.equal?(selected_page_ids, page_ids) -> :all
+      true -> :some
+    end
+  end
 end

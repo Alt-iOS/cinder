@@ -14,6 +14,7 @@ defmodule Cinder.Renderers.Grid do
 
   alias Cinder.Renderers.BulkActions
   alias Cinder.Renderers.Pagination
+  alias Cinder.Renderers.SelectAll
   alias Cinder.Renderers.SortControls
   alias Cinder.Selection
 
@@ -81,6 +82,18 @@ defmodule Cinder.Renderers.Grid do
         theme={@theme}
         myself={@myself}
       />
+
+      <div :if={Selection.enabled?(@selectable)} class="mb-3">
+        <SelectAll.render
+          data={@data}
+          id_field={@id_field}
+          loading={@loading}
+          myself={@myself}
+          selectable={@selectable}
+          selected_ids={@selected_ids}
+          theme={@theme}
+        />
+      </div>
 
       <!-- Grid Items Container -->
       <div class={@grid_container_class} data-key="grid_container_class">

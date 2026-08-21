@@ -339,6 +339,58 @@ defmodule Cinder.SelectionTest do
                          selected_count: 2
                        }}
     end
+
+    test "ignores select-all while an asynchronous collection load is running" do
+      socket =
+        make_socket(%{
+          id: "test-table",
+          loading: true,
+          selectable: true,
+          selected_ids: MapSet.new(["previous-page"]),
+          id_field: :id,
+          data: [%{id: "stale-result"}]
+        })
+
+      {:noreply, updated_socket} =
+        LiveComponent.handle_event("toggle_select_all_page", %{}, socket)
+
+      assert updated_socket.assigns.selected_ids == MapSet.new(["previous-page"])
+    end
+
+    test "keeps off-page selections while visible data changes after filtering or sorting" do
+      socket =
+        make_socket(%{
+          id: "test-table",
+          selectable: true,
+          selected_ids: MapSet.new(["off-page"]),
+          id_field: :id,
+          data: [%{id: "visible-1"}, %{id: "visible-1"}, %{id: "visible-2"}]
+        })
+
+      {:noreply, updated_socket} =
+        LiveComponent.handle_event("toggle_select_all_page", %{}, socket)
+
+      assert updated_socket.assigns.selected_ids ==
+               MapSet.new(["off-page", "visible-1", "visible-2"])
+    end
+  end
+
+  describe "visible page selection state" do
+    test "reports none, some, and all without counting off-page IDs" do
+      data = [%{id: 1}, %{id: 2}]
+
+      assert Cinder.Selection.page_state(MapSet.new(["other"]), data, :id, true) == :none
+      assert Cinder.Selection.page_state(MapSet.new(["1", "other"]), data, :id, true) == :some
+      assert Cinder.Selection.page_state(MapSet.new(["1", "2", "other"]), data, :id, true) == :all
+    end
+
+    test "deduplicates visible IDs and excludes non-selectable items" do
+      data = [%{id: 1, enabled?: true}, %{id: 1, enabled?: true}, %{id: 2, enabled?: false}]
+      selectable = & &1.enabled?
+
+      assert Cinder.Selection.page_ids(data, :id, selectable) == MapSet.new(["1"])
+      assert Cinder.Selection.page_state(MapSet.new(["1"]), data, :id, selectable) == :all
+    end
   end
 
   describe "clear_selection event" do

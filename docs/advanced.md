@@ -511,6 +511,22 @@ checkbox so it can still be deselected. The predicate is also enforced
 server-side, so tampering with the disabled checkboxes in the browser has no
 effect.
 
+### Selecting the Visible Page
+
+Every selectable table, grid, and list renders a select-all control. It operates
+on the selectable records in the currently rendered page or batch only:
+
+- unchecked means no visible selectable record is selected;
+- indeterminate means some visible selectable records are selected; and
+- checked means every visible selectable record is selected.
+
+Selecting or clearing the visible page preserves selections made on other
+pages. Filtering, sorting, and pagination also preserve those off-page IDs, so
+the bulk-action count continues to describe the complete selection. IDs are
+stored in a `MapSet`, preventing duplicates. While an asynchronous collection
+load is running, the control is disabled and stale rendered data cannot change
+the selection.
+
 ```heex
 <!-- Only active users can be selected -->
 <Cinder.collection
