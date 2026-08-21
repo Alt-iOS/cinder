@@ -30,10 +30,14 @@ defmodule Cinder.LiveComponent do
 
   def update(%{refresh: true} = assigns, socket) do
     # Force refresh of data
+    silent_refresh? =
+      Map.get(assigns, :silent_refresh, false) and refreshable_data_present?(socket)
+
     socket =
       socket
-      |> assign(Map.drop(assigns, [:refresh]))
+      |> assign(Map.drop(assigns, [:refresh, :silent_refresh]))
       |> assign_defaults()
+      |> assign(:silent_refresh, silent_refresh?)
       |> assign_column_definitions()
       |> load_data()
 
@@ -639,6 +643,7 @@ defmodule Cinder.LiveComponent do
   defp handle_result({:ok, page}, socket) do
     socket
     |> assign(:loading, false)
+    |> assign(:silent_refresh, false)
     |> assign(:error, false)
     |> assign(:data, page.results)
     |> assign(:page, page)
@@ -658,11 +663,7 @@ defmodule Cinder.LiveComponent do
       }
     )
 
-    socket
-    |> assign(:loading, false)
-    |> assign(:error, true)
-    |> assign(:data, [])
-    |> assign(:page, nil)
+    handle_load_error(socket)
   end
 
   defp handle_result({:exit, reason}, socket) do
@@ -677,12 +678,25 @@ defmodule Cinder.LiveComponent do
       }
     )
 
-    socket
-    |> assign(:loading, false)
-    |> assign(:error, true)
-    |> assign(:data, [])
-    |> assign(:page, nil)
+    handle_load_error(socket)
   end
+
+  defp handle_load_error(socket) do
+    if socket.assigns.silent_refresh do
+      socket
+      |> assign(:loading, false)
+      |> assign(:silent_refresh, false)
+      |> assign(:error, false)
+    else
+      socket
+      |> assign(:loading, false)
+      |> assign(:error, true)
+      |> assign(:data, [])
+      |> assign(:page, nil)
+    end
+  end
+
+  defp refreshable_data_present?(socket), do: socket.assigns[:data] not in [nil, []]
 
   defp maybe_update_keyset_cursors(socket, %Ash.Page.Keyset{} = page) do
     results = page.results
@@ -846,6 +860,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:page_size_config, updated_page_size_config)
     |> assign(:current_page, assigns[:current_page] || 1)
     |> assign(:loading, false)
+    |> assign(:silent_refresh, false)
     |> assign(:error, assigns[:error] || false)
     |> assign(:data, assigns[:data] || [])
     |> assign(:sort_by, assigns[:sort_by] || extract_initial_sorts(assigns))

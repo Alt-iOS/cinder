@@ -247,6 +247,18 @@ The `*_if_visible` variants never call your function if the item isn't displayed
 - For changes that affect derived data, use `refresh_table/2` instead.
 - If the item is not found in the current page, the update is silently ignored.
 
+For notification-driven changes that require a full requery, keep the current
+rows visible while their replacement loads with a silent asynchronous refresh:
+
+```elixir
+def handle_info(%Ash.Notifier.Notification{}, socket) do
+  {:noreply, refresh_table(socket, "users-table", silent: true)}
+end
+```
+
+Cinder still marks the collection as busy internally, but suppresses the visual
+loading treatment. A failed silent refresh retains the current data.
+
 ## Loading, Empty & Error States
 
 Customize the loading spinner, empty message, and error display using slots. These replace the default string messages with rich content.

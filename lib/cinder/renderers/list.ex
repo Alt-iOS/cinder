@@ -32,6 +32,10 @@ defmodule Cinder.Renderers.List do
 
     assigns =
       assigns
+      |> assign(
+        :show_loading_state,
+        assigns.loading and not Map.get(assigns, :silent_refresh, false)
+      )
       |> assign(:has_item_slot, has_item_slot)
       |> assign(:list_container_class, container_class)
       |> assign(:list_item_class, item_class)
@@ -67,7 +71,7 @@ defmodule Cinder.Renderers.List do
           sort_label={@sort_label}
           theme={@theme}
           myself={@myself}
-          loading={@loading}
+          loading={@show_loading_state}
         />
       </div>
 
@@ -136,7 +140,7 @@ defmodule Cinder.Renderers.List do
       </div>
 
       <!-- Loading indicator -->
-      <div :if={@loading} class={@theme.loading_overlay_class} data-key="loading_overlay_class">
+      <div :if={@show_loading_state} class={@theme.loading_overlay_class} data-key="loading_overlay_class">
         <%= if has_slot?(assigns, :loading_slot) do %>
           {render_slot(@loading_slot)}
         <% else %>

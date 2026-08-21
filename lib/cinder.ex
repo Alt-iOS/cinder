@@ -144,7 +144,9 @@ defmodule Cinder do
 
   # Refresh functions
   defdelegate refresh_table(socket, table_id), to: Cinder.Refresh
+  defdelegate refresh_table(socket, table_id, opts), to: Cinder.Refresh
   defdelegate refresh_tables(socket, table_ids), to: Cinder.Refresh
+  defdelegate refresh_tables(socket, table_ids, opts), to: Cinder.Refresh
 
   # In-memory update functions (efficient for small PubSub-driven changes)
   defdelegate update_item(socket, collection_id, id, update_fn), to: Cinder.Update
