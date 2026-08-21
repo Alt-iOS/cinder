@@ -67,6 +67,9 @@ defmodule Cinder.Renderers.TableSelectionTest do
       assert html =~ ~s(phx-click="toggle_select_all")
       # Selection header uses th_class with w-10 width
       assert html =~ "test-th-class"
+
+      refute html =~
+               ~r/<label[^>]*class="[^"]*mb-3[^"]*"[^>]*data-key="select_all_container_class"/
     end
 
     test "uses the complete filtered scope for checked and indeterminate state" do

@@ -61,6 +61,7 @@ defmodule Cinder.Renderers.GridSelectionTest do
 
       assert html =~ ~s(phx-click="toggle_select_all")
       assert html =~ "Select all filtered items"
+      assert html =~ ~r/<div[^>]*class="mb-3"[^>]*>\s*<label/
     end
 
     test "renders overlay checkbox with theme classes when selectable=true" do
