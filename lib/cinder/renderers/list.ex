@@ -98,7 +98,7 @@ defmodule Cinder.Renderers.List do
         myself={@myself}
       />
 
-      <div :if={Selection.enabled?(@selectable)}>
+      <div :if={Selection.enabled?(@selectable)} class="mb-3">
         <SelectAll.render
           data={@data}
           id_field={@id_field}
