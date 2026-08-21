@@ -68,6 +68,14 @@ defmodule Cinder.Selection do
 
   def page_ids(_data, _id_field, _selectable), do: MapSet.new()
 
+  @doc false
+  def filtered_ids(resource_or_query, options, id_field, selectable) do
+    with {:ok, query} <- Cinder.QueryBuilder.build_query(resource_or_query, options),
+         {:ok, records} <- Cinder.QueryBuilder.read_all(query, options) do
+      {:ok, page_ids(records, id_field, selectable)}
+    end
+  end
+
   @doc """
   Returns `:none`, `:some`, or `:all` for the selectable visible items.
   """

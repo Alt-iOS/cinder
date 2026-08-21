@@ -201,5 +201,5 @@ msgstr "Ocurrió un error al cargar los datos"
 
 #: lib/cinder/renderers/select_all.ex
 #, elixir-autogen, elixir-format
-msgid "Select all visible items"
-msgstr "Seleccionar todos los elementos visibles"
+msgid "Select all filtered items"
+msgstr "Seleccionar todos los elementos filtrados"

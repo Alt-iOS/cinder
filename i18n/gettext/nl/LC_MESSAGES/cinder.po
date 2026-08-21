@@ -201,5 +201,5 @@ msgstr "Er is een fout opgetreden bij het laden van gegevens"
 
 #: lib/cinder/renderers/select_all.ex
 #, elixir-autogen, elixir-format
-msgid "Select all visible items"
-msgstr "Alle zichtbare items selecteren"
+msgid "Select all filtered items"
+msgstr "Alle gefilterde items selecteren"

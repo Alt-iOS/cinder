@@ -64,9 +64,33 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~s(phx-click="toggle_select_all_page")
+      assert html =~ ~s(phx-click="toggle_select_all")
       # Selection header uses th_class with w-10 width
       assert html =~ "test-th-class"
+    end
+
+    test "uses the complete filtered scope for checked and indeterminate state" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          selectable: true,
+          data: [%{id: "user-1", name: "Alice"}],
+          selection_scope_ids: MapSet.new(["user-1", "user-2"]),
+          selected_ids: MapSet.new(["user-1"])
+        })
+
+      html = render_component(&TableRenderer.render/1, assigns)
+      assert html =~ ~s(data-selection-state="some")
+      assert html =~ ~s(data-key="select_all_container_class")
+      assert html =~ ~s(data-key="selection_indeterminate_class")
+
+      checked_html =
+        render_component(
+          &TableRenderer.render/1,
+          Map.put(assigns, :selected_ids, MapSet.new(["user-1", "user-2"]))
+        )
+
+      assert checked_html =~ ~s(data-selection-state="all")
     end
 
     test "renders row checkboxes with correct attributes when selectable=true" do
@@ -98,7 +122,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       # No selection checkboxes or events should be rendered
       refute html =~ "toggle_select"
-      refute html =~ "toggle_select_all_page"
+      refute html =~ "toggle_select_all"
       refute html =~ "test-checkbox-class"
     end
 
@@ -129,7 +153,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all"/
     end
 
     test "header checkbox exposes an indeterminate state when some visible items are selected" do
@@ -155,7 +179,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select_all_page"/
+      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select_all"/
     end
 
     test "row checkbox reflects selection state" do
@@ -193,7 +217,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
     test "renders the selection column header when a predicate is given" do
       html = render_component(&TableRenderer.render/1, predicate_assigns())
 
-      assert html =~ ~s(phx-click="toggle_select_all_page")
+      assert html =~ ~s(phx-click="toggle_select_all")
     end
 
     test "renders an enabled checkbox for selectable rows and a disabled one otherwise" do
@@ -224,7 +248,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all"/
     end
 
     test "header checkbox is unchecked when there are no selectable rows" do
@@ -239,7 +263,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      refute html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
+      refute html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all"/
     end
 
     test "applies selected styling only to selectable selected rows" do

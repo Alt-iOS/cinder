@@ -221,6 +221,16 @@ defmodule Cinder.QueryBuilder do
     end
   end
 
+  @doc false
+  def read_all(%Ash.Query{} = prepared_query, options) do
+    prepared_query
+    |> Ash.read(Keyword.put(build_read_opts(options), :page, false))
+    |> case do
+      {:ok, results} when is_list(results) -> {:ok, results}
+      {:error, _reason} = error -> error
+    end
+  end
+
   # Prepare the query for execution by ensuring it has an action set.
   #
   # If the caller supplied an already-prepared `Ash.Query` (`query.action != nil`),

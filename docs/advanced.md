@@ -511,21 +511,25 @@ checkbox so it can still be deselected. The predicate is also enforced
 server-side, so tampering with the disabled checkboxes in the browser has no
 effect.
 
-### Selecting the Visible Page
+### Selecting All Filtered Records
 
-Every selectable table, grid, and list renders a select-all control. It operates
-on the selectable records in the currently rendered page or batch only:
+Every selectable table, grid, and list renders a select-all control. It selects
+every selectable record matched by the collection's current query, filters, and
+search—not only the rendered page. The lookup runs asynchronously and uses the
+same actor, tenant, scope, action, and query options as the collection.
 
-- unchecked means no visible selectable record is selected;
-- indeterminate means some visible selectable records are selected; and
-- checked means every visible selectable record is selected.
+Selected IDs are stored in a `MapSet`, preventing duplicates and allowing bulk
+actions to operate on the complete filtered selection. Pagination and sorting
+preserve the selection. Changing the query, filters, or search invalidates the
+cached select-all scope so the next click evaluates the new result set.
 
-Selecting or clearing the visible page preserves selections made on other
-pages. Filtering, sorting, and pagination also preserve those off-page IDs, so
-the bulk-action count continues to describe the complete selection. IDs are
-stored in a `MapSet`, preventing duplicates. While an asynchronous collection
-load is running, the control is disabled and stale rendered data cannot change
-the selection.
+Before a complete filtered scope has been loaded, the checkbox reflects the
+currently rendered page. After select-all completes, unchecked, indeterminate,
+and checked describe the complete filtered scope. While either collection data
+or the select-all query is loading, the control is disabled.
+
+The control inherits `select_all_container_class`, `selection_checkbox_class`,
+and `selection_indeterminate_class` from the active Cinder theme.
 
 ```heex
 <!-- Only active users can be selected -->

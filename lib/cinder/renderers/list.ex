@@ -68,7 +68,7 @@ defmodule Cinder.Renderers.List do
           sort_label={@sort_label}
           theme={@theme}
           myself={@myself}
-          loading={@loading}
+          loading={@loading or Map.get(assigns, :selection_loading, false)}
         />
       </div>
 
@@ -81,12 +81,13 @@ defmodule Cinder.Renderers.List do
         myself={@myself}
       />
 
-      <div :if={Selection.enabled?(@selectable)} class="mb-3">
+      <div :if={Selection.enabled?(@selectable)}>
         <SelectAll.render
           data={@data}
           id_field={@id_field}
           loading={@loading}
           myself={@myself}
+          scope_ids={Map.get(assigns, :selection_scope_ids)}
           selectable={@selectable}
           selected_ids={@selected_ids}
           theme={@theme}

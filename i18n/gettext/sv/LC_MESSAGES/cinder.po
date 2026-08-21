@@ -201,5 +201,5 @@ msgstr "Ett fel uppstod vid laddning av data"
 
 #: lib/cinder/renderers/select_all.ex
 #, elixir-autogen, elixir-format
-msgid "Select all visible items"
-msgstr "Markera alla synliga objekt"
+msgid "Select all filtered items"
+msgstr "Markera alla filtrerade objekt"
