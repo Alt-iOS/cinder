@@ -298,21 +298,22 @@ defmodule Cinder.UrlManager do
       [{"score", :asc_nils_last}, {"priority", :desc_nils_first}]
 
   """
+  def decode_sort(nil, _columns), do: []
+  def decode_sort("", _columns), do: []
+
   def decode_sort(url_sort, columns) when is_binary(url_sort) and is_list(columns) do
     url_sort
     |> parse_sort_string()
     |> filter_valid_sorts(columns)
   end
 
-  def decode_sort(nil, _columns), do: []
-  def decode_sort("", _columns), do: []
-
   # Backward compatibility - if called without columns, parse but don't validate
+  def decode_sort(nil), do: []
+  def decode_sort(""), do: []
+
   def decode_sort(url_sort) when is_binary(url_sort) do
     parse_sort_string(url_sort)
   end
-
-  def decode_sort(nil), do: []
 
   # Helper function to parse sort string into {field, direction} tuples
   defp parse_sort_string(url_sort) do
