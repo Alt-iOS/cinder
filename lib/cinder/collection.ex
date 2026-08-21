@@ -169,7 +169,25 @@ defmodule Cinder.Collection do
   attr(:pagination, :any,
     default: :offset,
     doc:
-      "Pagination mode: :offset (default) or :keyset. Keyset pagination is faster for large datasets but only supports prev/next navigation."
+      "Pagination mode: :offset (default), :keyset, or :infinite. Infinite pagination appends keyset batches as the viewport reaches the end."
+  )
+
+  attr(:window_size, :integer,
+    default: nil,
+    doc:
+      "Maximum number of records retained in the browser DOM for infinite pagination. " <>
+        "Defaults to page_size * (1 + 2 * overscan)."
+  )
+
+  attr(:overscan, :integer,
+    default: 1,
+    doc: "Number of additional page_size batches prefetched for infinite pagination."
+  )
+
+  attr(:show_item_numbers, :boolean,
+    default: false,
+    doc:
+      "Show stable item numbers. Keyset pages use their sequential page position; infinite batches retain accumulated numbering."
   )
 
   attr(:show_filters, :any,
@@ -508,6 +526,9 @@ defmodule Cinder.Collection do
         search_placeholder={@search_placeholder}
         search_fn={@search_fn}
         pagination_mode={@pagination_mode}
+        window_size={@window_size}
+        overscan={@overscan}
+        show_item_numbers={@show_item_numbers}
         id_field={@id_field}
         selectable={@selectable}
         on_selection_change={@on_selection_change}
@@ -919,8 +940,10 @@ defmodule Cinder.Collection do
 
   defp parse_pagination_mode(:offset), do: :offset
   defp parse_pagination_mode(:keyset), do: :keyset
+  defp parse_pagination_mode(:infinite), do: :infinite
   defp parse_pagination_mode("offset"), do: :offset
   defp parse_pagination_mode("keyset"), do: :keyset
+  defp parse_pagination_mode("infinite"), do: :infinite
   defp parse_pagination_mode(_invalid), do: :offset
 
   # ============================================================================

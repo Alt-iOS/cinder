@@ -392,6 +392,19 @@ Use `query_opts` to load only needed data:
 >
   ...
 </Cinder.collection>
+
+<!-- Infinite scrolling with keyset batches -->
+<Cinder.collection
+  resource={MyApp.User}
+  actor={@current_user}
+  pagination={:infinite}
+  page_size={25}
+  window_size={75}
+  overscan={1}
+  show_item_numbers
+>
+  ...
+</Cinder.collection>
 ```
 
 **Global Default Page Size:**
@@ -408,12 +421,40 @@ config :cinder, default_page_size: [default: 25, options: [10, 25, 50, 100]]
 
 Individual collections can still override with the `page_size` attribute.
 
-**Keyset vs Offset Pagination:**
+**Pagination Modes:**
 
 - **Offset** (default): Traditional page numbers, allows jumping to any page. Can be slow on large datasets.
-- **Keyset**: Cursor-based prev/next navigation. Much faster on large datasets but cannot jump to arbitrary pages.
+- **Keyset**: Cursor-based previous/next navigation. Much faster on large datasets but cannot jump to a page whose cursor has not been visited. Cinder displays the sequential current page number and tracks record numbers so both remain meaningful while navigating in either direction.
+- **Infinite**: Streams unique keyset batches into the browser as the viewport reaches a sentinel. A “Load more” button remains available as an accessible fallback. The records themselves are released from LiveView socket state after render, and `window_size` bounds the records retained in the browser DOM; advancing past that window exposes a “Load previous” sentinel. Loading and retry states do not hide the retained window, and the end state cannot request another batch. Filtering, sorting, page-size changes, and refresh restart from the first batch.
 
-Use keyset pagination when you have large tables (10k+ rows) where offset queries become slow.
+For infinite pagination, `page_size` remains the Ash query batch size. `overscan` controls how many additional batches are prefetched (default `1`). `window_size` controls the client-side stream window and is rounded up to a whole number of batches; by default it is `page_size * (1 + 2 * overscan)`. For example, `page_size={25}`, `overscan={1}`, and `window_size={75}` load 25 records per query, prefetch one batch, and retain at most 75 rendered records. Cinder keeps cursor, page, ID, and selection metadata for the retained window, not the full record structs.
+
+Infinite collections use Cinder's LiveView hook to synchronize selection styling on records that the server has already released. Alias Cinder's shipped hook module in your asset bundler and include it in your `LiveSocket` hook registry. For example, with Vite:
+
+```javascript
+// vite.config.mjs
+import { resolve } from "node:path"
+
+resolve: {
+  alias: {
+    cinder_hooks: resolve(
+      process.env.MIX_BUILD_PATH,
+      "lib/cinder/priv/static/cinder_hooks.js"
+    )
+  }
+}
+
+// app.js
+import { hooks as cinderHooks } from "cinder_hooks"
+
+const liveSocket = new LiveSocket("/live", Socket, {
+  hooks: { ...cinderHooks, ...applicationHooks }
+})
+```
+
+Set `show_item_numbers` to render those stable numbers as a table column or a list/grid prefix. The `data-item-number` attribute is present on rendered items even when the visible number is disabled.
+
+Use keyset or infinite pagination when you have large collections (10k+ rows) where offset queries become slow.
 
 **Important:** Ensure your Ash action has pagination configured to prevent loading all records into memory:
 

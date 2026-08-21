@@ -30,6 +30,22 @@ defmodule Cinder.Integration.LiveViewTest do
     """
   end
 
+  defp infinite_album_collection(assigns) do
+    ~H"""
+    <Cinder.collection
+      id="infinite-albums"
+      resource={Cinder.Integration.Album}
+      pagination={:infinite}
+      page_size={3}
+      window_size={6}
+      overscan={0}
+      show_item_numbers
+    >
+      <:col :let={album} field="title">{album.title}</:col>
+    </Cinder.collection>
+    """
+  end
+
   setup do
     artist = generate(artist(name: "Test Artist"))
 
@@ -222,6 +238,56 @@ defmodule Cinder.Integration.LiveViewTest do
       end)
       |> assert_has("td", text: "Facelift")
       |> refute_has("td", text: "Dirt")
+    end
+
+    test "infinite streams prune the browser window instead of retaining every batch", %{
+      conn: conn
+    } do
+      path = Cinder.TestLive.Fixture.register(&infinite_album_collection/1)
+
+      conn
+      |> visit(path)
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 3)
+      |> unwrap(fn view ->
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
+        |> Phoenix.LiveViewTest.render_click()
+      end)
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
+      |> unwrap(fn view ->
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
+        |> Phoenix.LiveViewTest.render_click()
+      end)
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
+      |> refute_has("tr[data-item-number=\"1\"]")
+      |> assert_has("tr[data-item-number=\"7\"]")
+      |> unwrap(fn view ->
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
+        |> Phoenix.LiveViewTest.render_click()
+      end)
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
+      |> refute_has("tr[data-item-number=\"4\"]")
+      |> assert_has("tr[data-item-number=\"10\"]")
+      |> assert_has("[data-pagination-mode=infinite]", text: "showing 5-10 of 10")
+      |> assert_has("button[phx-click=load_previous]", text: "Load previous")
+      |> unwrap(fn view ->
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_previous]")
+        |> Phoenix.LiveViewTest.render_click()
+      end)
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
+      |> assert_has("tr[data-item-number=\"2\"]")
+      |> refute_has("tr[data-item-number=\"8\"]")
+      |> unwrap(fn view ->
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_previous]")
+        |> Phoenix.LiveViewTest.render_click()
+      end)
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
+      |> assert_has("tr[data-item-number=\"1\"]")
+      |> refute_has("tr[data-item-number=\"7\"]")
     end
   end
 

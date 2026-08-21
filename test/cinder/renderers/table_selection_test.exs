@@ -57,6 +57,23 @@ defmodule Cinder.Renderers.TableSelectionTest do
   end
 
   describe "table selection rendering" do
+    test "renders stable visible keyset item numbers when enabled" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          show_item_numbers: true,
+          pagination_mode: :keyset,
+          current_page: 3,
+          page: %{limit: 10},
+          data: [%{id: "user-1", name: "Alice"}, %{id: "user-2", name: "Bob"}]
+        })
+
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      assert html =~ ~r/data-item-number[^>]*>\s*21\s*</
+      assert html =~ ~r/data-item-number[^>]*>\s*22\s*</
+    end
+
     test "renders header checkbox with theme class when selectable=true" do
       assigns =
         base_assigns()
