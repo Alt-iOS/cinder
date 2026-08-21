@@ -90,7 +90,7 @@ defmodule Cinder.Renderers.PaginationTest do
   end
 
   describe "infinite pagination" do
-    test "renders a viewport sentinel while more results remain" do
+    test "renders an ahead-of-viewport sentinel while more results remain" do
       assigns =
         base_assigns("items")
         |> Map.merge(%{
@@ -104,7 +104,9 @@ defmodule Cinder.Renderers.PaginationTest do
       html = render_component(&Pagination.render/1, assigns)
 
       assert html =~ ~s(data-pagination-mode="infinite")
-      assert html =~ ~s(phx-viewport-bottom="load_more")
+      assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
+      assert html =~ ~s(data-infinite-prefetch-distance="viewport")
+      refute html =~ ~s(phx-viewport-bottom="load_more")
       assert html =~ "showing 1-10 of 100"
     end
 
@@ -125,7 +127,7 @@ defmodule Cinder.Renderers.PaginationTest do
 
       end_html = render_component(&Pagination.render/1, ended)
       assert end_html =~ ~s(data-pagination-state="end")
-      refute end_html =~ ~s(phx-viewport-bottom="load_more")
+      refute end_html =~ ~s(phx-hook="CinderInfiniteSentinel")
     end
   end
 

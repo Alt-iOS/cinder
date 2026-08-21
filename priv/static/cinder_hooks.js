@@ -33,4 +33,47 @@ const CinderInfiniteStream = {
   },
 };
 
-export const hooks = { CinderInfiniteStream };
+const CinderInfiniteSentinel = {
+  mounted() {
+    this.triggered = false;
+    this.observeAheadOfViewport();
+
+    this.handleResize = () => this.observeAheadOfViewport();
+    window.addEventListener("resize", this.handleResize, { passive: true });
+  },
+
+  destroyed() {
+    this.observer?.disconnect();
+    window.removeEventListener("resize", this.handleResize);
+  },
+
+  observeAheadOfViewport() {
+    if (this.triggered) return;
+
+    this.observer?.disconnect();
+
+    // Start the request one viewport before the sentinel becomes visible. The
+    // prefetched DOM window can then absorb server/network latency without the
+    // user reaching the end of the rendered rows first.
+    const prefetchDistance = Math.max(window.innerHeight, 400);
+
+    this.observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting || this.triggered) return;
+
+        this.triggered = true;
+        this.observer.disconnect();
+        this.pushEventTo(this.el, "load_more", {});
+      },
+      {
+        root: null,
+        rootMargin: `0px 0px ${prefetchDistance}px 0px`,
+        threshold: 0,
+      },
+    );
+
+    this.observer.observe(this.el);
+  },
+};
+
+export const hooks = { CinderInfiniteSentinel, CinderInfiniteStream };

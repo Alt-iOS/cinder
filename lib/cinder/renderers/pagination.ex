@@ -305,7 +305,8 @@ defmodule Cinder.Renderers.Pagination do
           :if={@has_next and not @loading and not @error}
           id={"#{@id}-infinite-sentinel"}
           data-pagination-state="ready"
-          phx-viewport-bottom="load_more"
+          data-infinite-prefetch-distance="viewport"
+          phx-hook="CinderInfiniteSentinel"
           phx-target={@myself}
         >
           <button
