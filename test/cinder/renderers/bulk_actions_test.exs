@@ -213,20 +213,49 @@ defmodule Cinder.Renderers.BulkActionsTest do
         bulk_action_confirmation_slot: [
           %{
             inner_block: fn _assigns, context ->
-              "Confirm #{context.selected_count} for #{context.action}: #{context.data} / #{context.error}"
+              "Confirm #{context.selected_count} for #{context.action}: #{context.data} / #{context.error}; confirm=#{not is_nil(context.confirm)} cancel=#{not is_nil(context.cancel)}"
             end
           }
         ],
-        pending_bulk_action: 0,
-        bulk_action_confirmation_data: "prepared",
-        bulk_action_confirmation_error: "failed",
+        bulk_action_confirmation: %{
+          index: 0,
+          selected_ids: MapSet.new(["1", "2"]),
+          data: "prepared",
+          error: "failed"
+        },
         theme: @theme,
         myself: %Phoenix.LiveComponent.CID{cid: 1}
       }
 
       html = render_component(&BulkActions.render/1, assigns)
 
-      assert html =~ "Confirm 2 for delete: prepared / failed"
+      assert html =~ "Confirm 2 for delete: prepared / failed; confirm=true cancel=true"
+    end
+
+    test "renders the custom confirmation slot while inactive" do
+      assigns = %{
+        selectable: true,
+        selected_ids: MapSet.new(["1"]),
+        bulk_action_slots: [
+          %{action: :delete, label: "Delete", confirmation: :slot}
+        ],
+        bulk_action_confirmation_slot: [
+          %{
+            inner_block: fn _assigns, context ->
+              "data=#{inspect(context.data)} error=#{inspect(context.error)} confirm=#{inspect(context.confirm)} cancel=#{inspect(context.cancel)}"
+            end
+          }
+        ],
+        bulk_action_confirmation: nil,
+        theme: @theme,
+        myself: %Phoenix.LiveComponent.CID{cid: 1}
+      }
+
+      html = render_component(&BulkActions.render/1, assigns)
+
+      assert html =~ "data=nil error=nil confirm=nil cancel=nil"
+      refute html =~ "bulk_action_execute"
+      refute html =~ "bulk_action_cancel"
     end
   end
 end

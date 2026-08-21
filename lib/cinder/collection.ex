@@ -342,7 +342,7 @@ defmodule Cinder.Collection do
 
     attr(:prepare_confirmation, :fun,
       doc:
-        "Optional function called with the confirmation context before rendering a slot confirmation. Return {:ok, data} or {:error, reason}."
+        "Optional function called with the confirmation context before rendering a slot confirmation. Returns {:ok, data}, {:error, reason}, :ok, or a plain data value."
     )
 
     attr(:on_success, :atom,

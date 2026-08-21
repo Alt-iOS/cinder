@@ -15,6 +15,7 @@ defmodule Cinder.LiveComponent do
 
   use Phoenix.LiveComponent
   require Logger
+
   use Cinder.Messages
 
   @impl true
@@ -425,7 +426,13 @@ defmodule Cinder.LiveComponent do
     slot = Enum.at(slots, index)
 
     if slot do
-      execute_bulk_action(slot, socket)
+      selected_ids =
+        case socket.assigns[:bulk_action_confirmation] do
+          %{index: ^index, selected_ids: selected_ids} -> selected_ids
+          _ -> socket.assigns.selected_ids
+        end
+
+      execute_bulk_action(slot, selected_ids, socket)
     else
       Logger.warning("Cinder: Bulk action slot not found at index #{index}")
       {:noreply, socket}
@@ -437,23 +444,31 @@ defmodule Cinder.LiveComponent do
     slots = socket.assigns[:bulk_action_slots] || []
 
     if slot = Enum.at(slots, index) do
+      selected_ids = socket.assigns.selected_ids
+
       context = %{
-        selected_ids: socket.assigns.selected_ids,
-        selected_count: MapSet.size(socket.assigns.selected_ids),
+        selected_ids: selected_ids,
+        selected_count: MapSet.size(selected_ids),
         action: slot[:action]
       }
 
-      {confirmation_data, confirmation_error} =
-        case Cinder.BulkActionConfirmation.prepare(slot[:prepare_confirmation], context) do
-          {:ok, data} -> {data, nil}
-          {:error, reason} -> {nil, reason}
-        end
+      confirmation = %{
+        index: index,
+        selected_ids: selected_ids
+      }
 
-      {:noreply,
-       socket
-       |> assign(:pending_bulk_action, index)
-       |> assign(:bulk_action_confirmation_data, confirmation_data)
-       |> assign(:bulk_action_confirmation_error, confirmation_error)}
+      socket = assign(socket, :bulk_action_confirmation, confirmation)
+
+      case slot[:prepare_confirmation] do
+        nil ->
+          {:noreply, put_confirmation_result(socket, index, {:ok, nil})}
+
+        callback ->
+          {:noreply,
+           start_async(socket, {:bulk_action_confirmation, index}, fn ->
+             Cinder.BulkActionConfirmation.prepare(callback, context)
+           end)}
+      end
     else
       Logger.warning("Cinder: Bulk action slot not found at index #{index}")
       {:noreply, socket}
@@ -462,11 +477,7 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("bulk_action_cancel", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:pending_bulk_action, nil)
-     |> assign(:bulk_action_confirmation_data, nil)
-     |> assign(:bulk_action_confirmation_error, nil)}
+    {:noreply, assign(socket, :bulk_action_confirmation, nil)}
   end
 
   @impl true
@@ -523,11 +534,11 @@ defmodule Cinder.LiveComponent do
   # BULK ACTION HELPERS
   # ============================================================================
 
-  defp execute_bulk_action(slot, socket) do
+  defp execute_bulk_action(slot, selected_ids, socket) do
     action = slot[:action]
-    selected_ids = socket.assigns.selected_ids |> MapSet.to_list()
+    selected_id_list = MapSet.to_list(selected_ids)
 
-    if selected_ids == [] do
+    if selected_id_list == [] do
       {:noreply, socket}
     else
       resource = extract_resource(socket.assigns)
@@ -536,7 +547,7 @@ defmodule Cinder.LiveComponent do
         result =
           Cinder.BulkActionExecutor.execute(action,
             resource: resource,
-            ids: selected_ids,
+            ids: selected_id_list,
             id_field: socket.assigns[:id_field] || :id,
             actor: socket.assigns[:actor],
             tenant: socket.assigns[:tenant],
@@ -544,7 +555,7 @@ defmodule Cinder.LiveComponent do
             action_opts: slot[:action_opts] || []
           )
 
-        handle_bulk_action_result(result, slot, socket)
+        handle_bulk_action_result(result, slot, selected_ids, socket)
       else
         Logger.error("Cinder: No resource configured for bulk action")
         {:noreply, socket}
@@ -552,25 +563,24 @@ defmodule Cinder.LiveComponent do
     end
   end
 
-  defp handle_bulk_action_result(result, slot, socket) do
+  defp handle_bulk_action_result(result, slot, selected_ids, socket) do
     case result do
       {:ok, bulk_result} ->
-        handle_bulk_action_success(slot, socket, bulk_result)
+        handle_bulk_action_success(slot, selected_ids, socket, bulk_result)
 
       {:error, reason} ->
         handle_bulk_action_error(slot, socket, reason)
     end
   end
 
-  defp handle_bulk_action_success(slot, socket, result) do
-    selected_count = MapSet.size(socket.assigns.selected_ids)
+  defp handle_bulk_action_success(slot, selected_ids, socket, result) do
+    selected_count = MapSet.size(selected_ids)
+    remaining_ids = MapSet.difference(socket.assigns.selected_ids, selected_ids)
 
     socket =
       socket
-      |> assign(:pending_bulk_action, nil)
-      |> assign(:bulk_action_confirmation_data, nil)
-      |> assign(:bulk_action_confirmation_error, nil)
-      |> assign(:selected_ids, MapSet.new())
+      |> assign(:bulk_action_confirmation, nil)
+      |> assign(:selected_ids, remaining_ids)
       |> notify_selection_change(:clear)
       |> load_data()
 
@@ -593,7 +603,7 @@ defmodule Cinder.LiveComponent do
   defp handle_bulk_action_error(slot, socket, reason) do
     Logger.error("Cinder: Bulk action failed: #{inspect(reason)}")
 
-    socket = assign(socket, :bulk_action_confirmation_error, reason)
+    socket = put_confirmation_error(socket, reason)
 
     if event_name = slot[:on_error] do
       send(
@@ -608,6 +618,32 @@ defmodule Cinder.LiveComponent do
     end
 
     {:noreply, socket}
+  end
+
+  defp put_confirmation_result(socket, index, result) do
+    case socket.assigns[:bulk_action_confirmation] do
+      %{index: ^index} = confirmation ->
+        confirmation =
+          case result do
+            {:ok, data} -> Map.put(confirmation, :data, data)
+            {:error, reason} -> Map.put(confirmation, :error, reason)
+          end
+
+        assign(socket, :bulk_action_confirmation, confirmation)
+
+      _other ->
+        socket
+    end
+  end
+
+  defp put_confirmation_error(socket, reason) do
+    case socket.assigns[:bulk_action_confirmation] do
+      %{index: _index} = confirmation ->
+        assign(socket, :bulk_action_confirmation, Map.put(confirmation, :error, reason))
+
+      _other ->
+        socket
+    end
   end
 
   defp extract_resource(assigns) do
@@ -658,6 +694,24 @@ defmodule Cinder.LiveComponent do
   # ============================================================================
   # ASYNC HANDLERS
   # ============================================================================
+
+  @impl true
+  def handle_async(
+        {:bulk_action_confirmation, index},
+        {:ok, result},
+        socket
+      ) do
+    {:noreply, put_confirmation_result(socket, index, result)}
+  end
+
+  @impl true
+  def handle_async(
+        {:bulk_action_confirmation, index},
+        {:exit, reason},
+        socket
+      ) do
+    {:noreply, put_confirmation_result(socket, index, {:error, reason})}
+  end
 
   def handle_async(:load_data, {:ok, {{:ok, page}, query}}, socket) do
     socket =
@@ -914,9 +968,7 @@ defmodule Cinder.LiveComponent do
     # Bulk actions
     |> assign_new(:bulk_action_slots, fn -> [] end)
     |> assign_new(:bulk_action_confirmation_slot, fn -> [] end)
-    |> assign_new(:pending_bulk_action, fn -> nil end)
-    |> assign_new(:bulk_action_confirmation_data, fn -> nil end)
-    |> assign_new(:bulk_action_confirmation_error, fn -> nil end)
+    |> assign_new(:bulk_action_confirmation, fn -> nil end)
   end
 
   defp assign_column_definitions(socket) do

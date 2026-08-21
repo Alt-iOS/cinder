@@ -57,12 +57,12 @@ defmodule Cinder.Renderers.BulkActions do
               selected_count={@selected_count}
             />
           <% else %>
-            {render_slot([slot], %{selected_ids: @selected_ids, selected_count: @selected_count})}
+            {render_slot([slot], action_context(assigns, slot, index))}
           <% end %>
         </span>
       <% end %>
     </div>
-    <%= if confirmation_slot_open?(assigns) do %>
+    <%= if Map.get(assigns, :bulk_action_confirmation_slot, []) != [] do %>
       {render_slot(@bulk_action_confirmation_slot, confirmation_context(assigns))}
     <% end %>
     """
@@ -110,23 +110,46 @@ defmodule Cinder.Renderers.BulkActions do
 
   defp confirmation_message(_slot, _count), do: nil
 
-  defp confirmation_slot_open?(assigns) do
-    is_integer(Map.get(assigns, :pending_bulk_action)) and
-      Map.get(assigns, :bulk_action_confirmation_slot, []) != []
-  end
-
-  defp confirmation_context(assigns) do
-    index = assigns.pending_bulk_action
-    slot = Enum.at(assigns.slots, index)
-
+  defp action_context(assigns, slot, index) do
     %{
       selected_ids: assigns.selected_ids,
       selected_count: assigns.selected_count,
-      action: slot[:action],
-      data: Map.get(assigns, :bulk_action_confirmation_data),
-      error: Map.get(assigns, :bulk_action_confirmation_error),
-      confirm: JS.push("bulk_action_execute", value: %{index: index}, target: assigns.myself),
-      cancel: JS.push("bulk_action_cancel", target: assigns.myself)
+      prepare:
+        if(slot[:confirmation] == :slot,
+          do: action_click(slot, index, assigns.myself)
+        )
+    }
+  end
+
+  defp confirmation_context(assigns) do
+    confirmation = Map.get(assigns, :bulk_action_confirmation)
+
+    {index, selected_ids} =
+      case confirmation do
+        %{index: index, selected_ids: selected_ids} ->
+          {index, selected_ids}
+
+        nil ->
+          {nil, assigns.selected_ids}
+      end
+
+    slot = index && Enum.at(assigns.slots, index)
+    prepared? = confirmation && Map.has_key?(confirmation, :data)
+
+    %{
+      selected_ids: selected_ids,
+      selected_count: MapSet.size(selected_ids),
+      action: slot && slot[:action],
+      data: confirmation && Map.get(confirmation, :data),
+      error: confirmation && Map.get(confirmation, :error),
+      confirm:
+        if(prepared?,
+          do: JS.push("bulk_action_execute", value: %{index: index}, target: assigns.myself)
+        ),
+      cancel:
+        if(confirmation,
+          do: JS.push("bulk_action_cancel", target: assigns.myself)
+        )
     }
   end
 

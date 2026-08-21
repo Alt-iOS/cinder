@@ -602,8 +602,9 @@ Add `confirm` to show a browser confirmation dialog. Use `{count}` to interpolat
 ```
 
 For an application-defined confirmation UI, set `confirmation={:slot}` and provide a
-`bulk_action_confirmation` slot. The slot receives the pending action, selection,
-and `Phoenix.LiveView.JS` commands for confirming or cancelling:
+`bulk_action_confirmation` slot. Preparation runs asynchronously. The slot is always
+rendered so applications can choose server-controlled or immediate client-controlled
+opening.
 
 ```heex
 <Cinder.collection resource={MyApp.User} actor={@current_user} selectable>
@@ -611,30 +612,63 @@ and `Phoenix.LiveView.JS` commands for confirming or cancelling:
 
   <:bulk_action
     action={:destroy}
-    label="Delete"
-    variant={:danger}
     confirmation={:slot}
     prepare_confirmation={fn context -> MyApp.Users.labels(context.selected_ids) end}
-  />
+    :let={action}
+  >
+    <button
+      type="button"
+      phx-click={action.prepare |> JS.show(to: "#confirm-bulk-delete")}
+    >
+      Delete
+    </button>
+  </:bulk_action>
 
   <:bulk_action_confirmation :let={confirmation}>
-    <.modal id="confirm-bulk-delete" open on_cancel={confirmation.cancel}>
+    <.modal
+      id="confirm-bulk-delete"
+      open={not is_nil(confirmation.cancel)}
+      on_cancel={confirmation.cancel}
+    >
       <p>Delete {confirmation.selected_count} selected users?</p>
-      <ul><li :for={label <- confirmation.data}>{label}</li></ul>
+      <p
+        :if={
+          not is_nil(confirmation.cancel) and is_nil(confirmation.confirm) and
+            is_nil(confirmation.error)
+        }
+      >
+        Loading selected users…
+      </p>
+      <ul :if={confirmation.data}><li :for={label <- confirmation.data}>{label}</li></ul>
       <p :if={confirmation.error}>The users could not be deleted.</p>
       <button type="button" phx-click={confirmation.cancel}>Cancel</button>
-      <button type="button" phx-click={confirmation.confirm}>Delete</button>
+      <button type="button" disabled={is_nil(confirmation.confirm)} phx-click={confirmation.confirm}>
+        Delete
+      </button>
     </.modal>
   </:bulk_action_confirmation>
 </Cinder.collection>
 ```
 
-The context contains `selected_ids`, `selected_count`, `action`, `data`, `error`,
-`confirm`, and `cancel`. `data` is the successful value returned by
-`prepare_confirmation`, or
-`nil` when no preparation function is configured. When execution fails, the slot
-stays open and `error` contains the action error so the application can render it.
-Cinder closes the slot after successful execution or cancellation.
+The bulk action context exposes `prepare`, which pushes preparation to Cinder and can
+be composed with any client-side `Phoenix.LiveView.JS` command.
+
+`prepare_confirmation` receives a map containing `selected_ids`, `selected_count`,
+and `action`. It may return `{:ok, data}`, `{:error, reason}`, `:ok` (equivalent to
+`{:ok, nil}`), or a plain value (equivalent to `{:ok, value}`). Raised exceptions are
+exposed as errors. Preparation runs asynchronously, so the selected IDs are
+snapshotted before the callback starts.
+
+The confirmation context contains `selected_ids`, `selected_count`, `action`, `data`,
+`error`, `confirm`, and `cancel`. Before preparation completes, `confirm` is `nil`.
+After a successful preparation it contains the command that executes the action.
+When preparation or execution fails, `error` contains the reason; execution errors
+do not discard prepared `data`. Cinder clears the confirmation after successful
+execution or cancellation.
+
+For server-controlled opening, use a labeled bulk action. Cinder's themed button
+pushes preparation automatically; bind the modal's `open` attribute to
+`not is_nil(confirmation.cancel)`.
 
 ### Success and Error Callbacks
 

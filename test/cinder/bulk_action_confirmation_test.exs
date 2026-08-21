@@ -35,6 +35,10 @@ defmodule Cinder.BulkActionConfirmationTest do
                BulkActionConfirmation.prepare(fn _context -> :prepared end, @context)
     end
 
+    test "normalizes :ok as nil data" do
+      assert {:ok, nil} = BulkActionConfirmation.prepare(fn _context -> :ok end, @context)
+    end
+
     test "preserves callback errors" do
       assert {:error, :unavailable} =
                BulkActionConfirmation.prepare(
@@ -70,16 +74,25 @@ defmodule Cinder.BulkActionConfirmationTest do
       assert {:noreply, socket} =
                LiveComponent.handle_event("bulk_action_prepare", %{"index" => 0}, socket)
 
-      assert socket.assigns.pending_bulk_action == 0
-      assert MapSet.new(socket.assigns.bulk_action_confirmation_data) == @context.selected_ids
-      assert socket.assigns.bulk_action_confirmation_error == nil
+      assert socket.assigns.bulk_action_confirmation.index == 0
+      assert socket.assigns.bulk_action_confirmation.selected_ids == @context.selected_ids
+      refute Map.has_key?(socket.assigns.bulk_action_confirmation, :data)
+      refute Map.has_key?(socket.assigns.bulk_action_confirmation, :error)
+
+      assert {:noreply, socket} =
+               LiveComponent.handle_async(
+                 {:bulk_action_confirmation, 0},
+                 {:ok, {:ok, ["one", "two"]}},
+                 socket
+               )
+
+      assert MapSet.new(socket.assigns.bulk_action_confirmation.data) ==
+               @context.selected_ids
 
       assert {:noreply, socket} =
                LiveComponent.handle_event("bulk_action_cancel", %{}, socket)
 
-      assert socket.assigns.pending_bulk_action == nil
-      assert socket.assigns.bulk_action_confirmation_data == nil
-      assert socket.assigns.bulk_action_confirmation_error == nil
+      assert socket.assigns.bulk_action_confirmation == nil
     end
 
     test "keeps confirmation open and exposes preparation errors" do
@@ -97,9 +110,30 @@ defmodule Cinder.BulkActionConfirmationTest do
       assert {:noreply, socket} =
                LiveComponent.handle_event("bulk_action_prepare", %{"index" => 0}, socket)
 
-      assert socket.assigns.pending_bulk_action == 0
-      assert socket.assigns.bulk_action_confirmation_data == nil
-      assert socket.assigns.bulk_action_confirmation_error == :unavailable
+      assert {:noreply, socket} =
+               LiveComponent.handle_async(
+                 {:bulk_action_confirmation, 0},
+                 {:ok, {:error, :unavailable}},
+                 socket
+               )
+
+      assert socket.assigns.bulk_action_confirmation.index == 0
+      assert socket.assigns.bulk_action_confirmation.error == :unavailable
+      refute Map.has_key?(socket.assigns.bulk_action_confirmation, :data)
+    end
+
+    test "ignores stale preparation results" do
+      socket = socket(%{bulk_action_confirmation: confirmation(:current)})
+
+      assert {:noreply, unchanged} =
+               LiveComponent.handle_async(
+                 {:bulk_action_confirmation, 1},
+                 {:ok, {:ok, :stale}},
+                 socket
+               )
+
+      assert unchanged.assigns.bulk_action_confirmation ==
+               socket.assigns.bulk_action_confirmation
     end
 
     test "keeps confirmation open and exposes execution errors" do
@@ -108,8 +142,7 @@ defmodule Cinder.BulkActionConfirmationTest do
       socket =
         socket(%{
           query: SearchTestResource,
-          pending_bulk_action: 0,
-          bulk_action_confirmation_data: :prepared,
+          bulk_action_confirmation: confirmation(:prepared),
           bulk_action_slots: [
             %{action: action, confirmation: :slot, on_error: :bulk_action_failed}
           ]
@@ -118,9 +151,9 @@ defmodule Cinder.BulkActionConfirmationTest do
       assert {:noreply, socket} =
                LiveComponent.handle_event("bulk_action_execute", %{"index" => 0}, socket)
 
-      assert socket.assigns.pending_bulk_action == 0
-      assert socket.assigns.bulk_action_confirmation_data == :prepared
-      assert socket.assigns.bulk_action_confirmation_error == :not_allowed
+      assert socket.assigns.bulk_action_confirmation.index == 0
+      assert socket.assigns.bulk_action_confirmation.data == :prepared
+      assert socket.assigns.bulk_action_confirmation.error == :not_allowed
 
       assert_received {:bulk_action_failed,
                        %{
@@ -136,9 +169,7 @@ defmodule Cinder.BulkActionConfirmationTest do
       socket =
         socket(%{
           query: SearchTestResource,
-          pending_bulk_action: 0,
-          bulk_action_confirmation_data: :prepared,
-          bulk_action_confirmation_error: :previous_error,
+          bulk_action_confirmation: confirmation(:prepared, :previous_error),
           bulk_action_slots: [
             %{action: action, confirmation: :slot, on_success: :bulk_action_succeeded}
           ]
@@ -147,9 +178,7 @@ defmodule Cinder.BulkActionConfirmationTest do
       assert {:noreply, socket} =
                LiveComponent.handle_event("bulk_action_execute", %{"index" => 0}, socket)
 
-      assert socket.assigns.pending_bulk_action == nil
-      assert socket.assigns.bulk_action_confirmation_data == nil
-      assert socket.assigns.bulk_action_confirmation_error == nil
+      assert socket.assigns.bulk_action_confirmation == nil
       assert socket.assigns.selected_ids == MapSet.new()
 
       assert_received {:bulk_action_succeeded,
@@ -209,9 +238,7 @@ defmodule Cinder.BulkActionConfirmationTest do
       actor: nil,
       tenant: nil,
       scope: nil,
-      pending_bulk_action: nil,
-      bulk_action_confirmation_data: nil,
-      bulk_action_confirmation_error: nil,
+      bulk_action_confirmation: nil,
       query_opts: [],
       page_size: 25,
       current_page: 1,
@@ -249,5 +276,10 @@ defmodule Cinder.BulkActionConfirmationTest do
 
   defp confirmation_slot do
     [%{inner_block: fn _assigns, _context -> "Confirmation" end}]
+  end
+
+  defp confirmation(data, error \\ nil) do
+    confirmation = %{index: 0, selected_ids: @context.selected_ids, data: data}
+    if error, do: Map.put(confirmation, :error, error), else: confirmation
   end
 end
