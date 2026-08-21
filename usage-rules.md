@@ -315,6 +315,12 @@ end
 {:noreply, refresh_tables(socket, ["collection1", "collection2"])}
 ```
 
+Keep current rows visible while an asynchronous requery runs:
+
+```elixir
+{:noreply, refresh_table(socket, "collection-id", silent: true)}
+```
+
 ### In-Memory Updates
 
 For PubSub-driven updates without re-querying:

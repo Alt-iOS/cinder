@@ -31,11 +31,15 @@ defmodule Cinder.LiveComponent do
 
   def update(%{refresh: true} = assigns, socket) do
     # Force refresh of data
+    silent_refresh? =
+      Map.get(assigns, :silent_refresh, false) and refreshable_data_present?(socket)
+
     socket =
       socket
-      |> assign(Map.drop(assigns, [:refresh]))
+      |> assign(Map.drop(assigns, [:refresh, :silent_refresh]))
       |> assign_defaults()
-      |> maybe_reset_infinite_pagination()
+      |> assign(:silent_refresh, silent_refresh?)
+      |> prepare_refresh()
       |> ensure_infinite_stream()
       |> assign_column_definitions()
       |> load_data()
@@ -989,17 +993,22 @@ defmodule Cinder.LiveComponent do
   end
 
   defp handle_result({:ok, page}, socket) do
-    if socket.assigns.pagination_mode == :infinite do
-      put_infinite_page(socket, page)
-    else
-      socket
-      |> assign(:loading, false)
-      |> assign(:error, false)
-      |> assign(:data, page.results)
-      |> assign(:page, page)
-      |> assign(:infinite_append?, false)
-      |> maybe_update_keyset_cursors(page)
-    end
+    socket =
+      if socket.assigns.pagination_mode == :infinite do
+        put_infinite_page(socket, page)
+      else
+        socket
+        |> assign(:loading, false)
+        |> assign(:error, false)
+        |> assign(:data, page.results)
+        |> assign(:page, page)
+        |> assign(:infinite_append?, false)
+        |> maybe_update_keyset_cursors(page)
+      end
+
+    socket
+    |> assign(:silent_refresh, false)
+    |> assign(:silent_refresh_state, nil)
   end
 
   defp handle_result({:error, error}, socket) do
@@ -1033,19 +1042,40 @@ defmodule Cinder.LiveComponent do
   end
 
   defp handle_load_error(socket) do
-    if socket.assigns.pagination_mode == :infinite and socket.assigns.infinite_append? and
-         socket.assigns.infinite_loaded_count > 0 do
-      socket
-      |> assign(:loading, false)
-      |> assign(:error, true)
-    else
-      socket
-      |> assign(:loading, false)
-      |> assign(:error, true)
-      |> assign(:data, [])
-      |> assign(:page, nil)
-      |> assign(:infinite_append?, false)
+    cond do
+      socket.assigns.silent_refresh ->
+        socket
+        |> maybe_restore_silent_refresh_state()
+        |> assign(:loading, false)
+        |> assign(:silent_refresh, false)
+        |> assign(:silent_refresh_state, nil)
+        |> assign(:error, false)
+
+      socket.assigns.pagination_mode == :infinite and socket.assigns.infinite_append? and
+          socket.assigns.infinite_loaded_count > 0 ->
+        socket
+        |> assign(:loading, false)
+        |> assign(:error, true)
+
+      true ->
+        socket
+        |> assign(:loading, false)
+        |> assign(:error, true)
+        |> assign(:data, [])
+        |> assign(:page, nil)
+        |> assign(:infinite_append?, false)
     end
+  end
+
+  defp maybe_restore_silent_refresh_state(%{assigns: %{silent_refresh_state: state}} = socket)
+       when is_map(state),
+       do: assign(socket, state)
+
+  defp maybe_restore_silent_refresh_state(socket), do: socket
+
+  defp refreshable_data_present?(socket) do
+    socket.assigns[:data] not in [nil, []] or
+      (socket.assigns[:infinite_loaded_count] || 0) > 0
   end
 
   defp maybe_update_keyset_cursors(socket, page) do
@@ -1074,7 +1104,10 @@ defmodule Cinder.LiveComponent do
     page_number = socket.assigns.current_page
     id_field = socket.assigns.id_field
     selectable = socket.assigns.selectable
-    existing_ids = socket.assigns.infinite_item_ids
+
+    existing_ids =
+      if direction == :reset, do: MapSet.new(), else: socket.assigns.infinite_item_ids
+
     number_start = infinite_number_start(socket, direction, length(page.results))
 
     entries =
@@ -1340,6 +1373,33 @@ defmodule Cinder.LiveComponent do
     if infinite_mode?(socket), do: reset_infinite_pagination(socket), else: socket
   end
 
+  @silent_infinite_state_keys ~w(
+    current_page after_keyset before_keyset first_keyset last_keyset
+    infinite_append? infinite_direction infinite_pages infinite_item_ids
+    infinite_selectable_ids infinite_loaded_count infinite_range_start
+    infinite_range_end infinite_has_previous infinite_has_next
+  )a
+
+  defp prepare_refresh(%{assigns: %{silent_refresh: true}} = socket) do
+    if infinite_mode?(socket) do
+      state = Map.take(socket.assigns, @silent_infinite_state_keys)
+
+      socket
+      |> assign(:silent_refresh_state, state)
+      |> assign(:current_page, 1)
+      |> assign(:after_keyset, nil)
+      |> assign(:before_keyset, nil)
+      |> assign(:first_keyset, nil)
+      |> assign(:last_keyset, nil)
+      |> assign(:infinite_append?, false)
+      |> assign(:infinite_direction, :reset)
+    else
+      socket
+    end
+  end
+
+  defp prepare_refresh(socket), do: maybe_reset_infinite_pagination(socket)
+
   defp infinite_mode?(socket),
     do: Map.get(socket.assigns, :pagination_mode, :offset) == :infinite
 
@@ -1488,6 +1548,8 @@ defmodule Cinder.LiveComponent do
     |> assign(:page_size_config, updated_page_size_config)
     |> assign(:current_page, assigns[:current_page] || 1)
     |> assign(:loading, false)
+    |> assign(:silent_refresh, assigns[:silent_refresh] || false)
+    |> assign(:silent_refresh_state, assigns[:silent_refresh_state])
     |> assign(:error, assigns[:error] || false)
     |> assign(:data, assigns[:data] || [])
     |> assign(:sort_by, assigns[:sort_by] || extract_initial_sorts(assigns))

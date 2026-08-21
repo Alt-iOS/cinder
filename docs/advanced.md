@@ -272,6 +272,18 @@ first bounded window; it does not load the entire result set into server memory.
 - If the item is not found in the current page, the update is silently ignored.
 - Infinite stream transforms must preserve the collection's configured ID field.
 
+For notification-driven changes that require a full requery, keep the current
+rows visible while their replacement loads with a silent asynchronous refresh:
+
+```elixir
+def handle_info(%Ash.Notifier.Notification{}, socket) do
+  {:noreply, refresh_table(socket, "users-table", silent: true)}
+end
+```
+
+Cinder still marks the collection as busy internally, but suppresses the visual
+loading treatment. A failed silent refresh retains the current data.
+
 ## Loading, Empty & Error States
 
 Customize the loading spinner, empty message, and error display using slots. These replace the default string messages with rich content.

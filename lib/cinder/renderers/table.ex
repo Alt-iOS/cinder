@@ -27,6 +27,10 @@ defmodule Cinder.Renderers.Table do
       |> assign_infinite_defaults()
       |> assign_new(:show_item_numbers, fn -> false end)
       |> assign_new(:current_page, fn -> 1 end)
+      |> assign(
+        :show_loading_state,
+        assigns.loading and not Map.get(assigns, :silent_refresh, false)
+      )
 
     ~H"""
     <div
@@ -102,13 +106,13 @@ defmodule Cinder.Renderers.Table do
               </th>
               <th :for={column <- @columns} class={[@theme.th_class, column.class]} data-key="th_class">
                 <div :if={column.sortable}
-                     class={["cursor-pointer select-none", (@loading && "opacity-75" || "")]}
+                     class={["cursor-pointer select-none", (@show_loading_state && "opacity-75" || "")]}
                      phx-click="toggle_sort"
                      phx-value-key={column.field}
                      phx-target={@myself}>
                      {column.label}
                      <span class={@theme.sort_indicator_class} data-key="sort_indicator_class">
-                       <SortIcon.sort_icon sort_direction={Cinder.QueryBuilder.get_sort_direction(@sort_by, column.field)} theme={@theme} loading={@loading} />
+                       <SortIcon.sort_icon sort_direction={Cinder.QueryBuilder.get_sort_direction(@sort_by, column.field)} theme={@theme} loading={@show_loading_state} />
                      </span>
                 </div>
                 <div :if={not column.sortable}>
@@ -119,7 +123,7 @@ defmodule Cinder.Renderers.Table do
           </thead>
           <tbody
             id={"#{@id}-items"}
-            class={[@theme.tbody_class, (@loading && "opacity-75" || "")]}
+            class={[@theme.tbody_class, (@show_loading_state && "opacity-75" || "")]}
             data-key="tbody_class"
             phx-update={if @pagination_mode == :infinite, do: "stream"}
           >
@@ -219,7 +223,7 @@ defmodule Cinder.Renderers.Table do
       </div>
 
       <!-- Loading indicator -->
-      <div :if={@loading and (@pagination_mode != :infinite or @infinite_loaded_count == 0)} class={@theme.loading_overlay_class} data-key="loading_overlay_class">
+      <div :if={@show_loading_state and (@pagination_mode != :infinite or @infinite_loaded_count == 0)} class={@theme.loading_overlay_class} data-key="loading_overlay_class">
         <%= if has_slot?(assigns, :loading_slot) do %>
           {render_slot(@loading_slot)}
         <% else %>

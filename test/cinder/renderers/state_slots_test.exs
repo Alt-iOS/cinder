@@ -338,6 +338,23 @@ defmodule Cinder.Renderers.StateSlotsTest do
       refute html =~ "No results found"
     end
 
+    test "silent refresh retains rows without rendering the loading treatment" do
+      html =
+        render_component(
+          &TableRenderer.render/1,
+          table_assigns(%{
+            loading: true,
+            silent_refresh: true,
+            data: [%{id: 1, name: "Current Item"}]
+          })
+        )
+
+      assert html =~ ~s(data-item-id="1")
+      assert html =~ "cell"
+      refute html =~ "Loading..."
+      refute html =~ ~r/data-key="loading_overlay_class"/
+    end
+
     test "error_message string attr works without slot" do
       assigns =
         table_assigns(%{
@@ -453,6 +470,23 @@ defmodule Cinder.Renderers.StateSlotsTest do
       refute html =~ ~r/data-key="error_class"/
     end
 
+    test "silent refresh retains items without rendering the loading treatment" do
+      html =
+        render_component(
+          &ListRenderer.render/1,
+          list_assigns(%{
+            loading: true,
+            silent_refresh: true,
+            data: [%{id: 1, name: "Current Item"}]
+          })
+        )
+
+      assert html =~ "item content"
+      assert html =~ ~r/data-key="list_item_class"/
+      refute html =~ "Loading..."
+      refute html =~ ~r/data-key="loading_overlay_class"/
+    end
+
     test "error state hides data items even if stale data present" do
       assigns =
         list_assigns(%{
@@ -554,6 +588,23 @@ defmodule Cinder.Renderers.StateSlotsTest do
 
       assert html =~ "Loading..."
       refute html =~ ~r/data-key="error_class"/
+    end
+
+    test "silent refresh retains items without rendering the loading treatment" do
+      html =
+        render_component(
+          &GridRenderer.render/1,
+          grid_assigns(%{
+            loading: true,
+            silent_refresh: true,
+            data: [%{id: 1, name: "Current Item"}]
+          })
+        )
+
+      assert html =~ "item content"
+      assert html =~ ~r/data-key="grid_item_class"/
+      refute html =~ "Loading..."
+      refute html =~ ~r/data-key="loading_overlay_class"/
     end
 
     test "error state hides data items even if stale data present" do

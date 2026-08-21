@@ -39,6 +39,10 @@ defmodule Cinder.Renderers.Grid do
       |> assign_infinite_defaults()
       |> assign_new(:show_item_numbers, fn -> false end)
       |> assign_new(:current_page, fn -> 1 end)
+      |> assign(
+        :show_loading_state,
+        assigns.loading and not Map.get(assigns, :silent_refresh, false)
+      )
       |> assign(:has_item_slot, has_item_slot)
       |> assign(:grid_container_class, container_class)
       |> assign(:grid_item_class, item_class)
@@ -85,7 +89,7 @@ defmodule Cinder.Renderers.Grid do
           sort_label={@sort_label}
           theme={@theme}
           myself={@myself}
-          loading={@loading}
+          loading={@show_loading_state}
         />
       </div>
 
@@ -237,7 +241,7 @@ defmodule Cinder.Renderers.Grid do
       </div>
 
       <!-- Loading indicator -->
-      <div :if={@loading and (@pagination_mode != :infinite or @infinite_loaded_count == 0)} class={@theme.loading_overlay_class} data-key="loading_overlay_class">
+      <div :if={@show_loading_state and (@pagination_mode != :infinite or @infinite_loaded_count == 0)} class={@theme.loading_overlay_class} data-key="loading_overlay_class">
         <%= if has_slot?(assigns, :loading_slot) do %>
           {render_slot(@loading_slot)}
         <% else %>
