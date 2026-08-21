@@ -47,6 +47,10 @@ const CinderInfiniteSentinel = {
     window.removeEventListener("resize", this.handleResize);
   },
 
+  reconnected() {
+    if (!this.triggered) this.observeAheadOfViewport();
+  },
+
   observeAheadOfViewport() {
     if (this.triggered) return;
 
@@ -58,12 +62,25 @@ const CinderInfiniteSentinel = {
     const prefetchDistance = Math.max(window.innerHeight, 400);
 
     this.observer = new IntersectionObserver(
-      ([entry]) => {
+      async ([entry]) => {
         if (!entry?.isIntersecting || this.triggered) return;
 
         this.triggered = true;
         this.observer.disconnect();
-        this.pushEventTo(this.el, "load_more", {});
+
+        try {
+          const results = await this.pushEventTo(this.el, "load_more", {});
+          const failure = results.find(({ status }) => status === "rejected");
+
+          if (results.length === 0) {
+            throw new Error("no LiveView target accepted the load_more push");
+          }
+
+          if (failure) throw failure.reason;
+        } catch (error) {
+          this.triggered = false;
+          console.error("Cinder infinite-scroll load_more push failed", error);
+        }
       },
       {
         root: null,
