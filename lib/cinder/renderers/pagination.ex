@@ -253,23 +253,13 @@ defmodule Cinder.Renderers.Pagination do
 
   defp render_infinite(assigns) do
     page = assigns.page
-    loaded_count = Map.get(assigns, :loaded_count, length(page.results))
     has_next = Map.get(assigns, :has_next, has_next_keyset_page?(page))
-    has_previous = Map.get(assigns, :has_previous, false)
 
     assigns =
       assigns
       |> assign(:error, Map.get(assigns, :error, false))
       |> assign(:has_next, has_next)
-      |> assign(:has_previous, has_previous)
-      |> assign(:loaded_count, loaded_count)
-      |> assign(
-        :range_start,
-        Map.get(assigns, :range_start, if(loaded_count > 0, do: 1, else: 0))
-      )
-      |> assign(:range_end, Map.get(assigns, :range_end, loaded_count))
       |> assign(:loading, Map.get(assigns, :loading, false))
-      |> assign(:total_count, page.count)
 
     ~H"""
     <div
@@ -278,15 +268,13 @@ defmodule Cinder.Renderers.Pagination do
       data-pagination-mode="infinite"
     >
       <div class={@theme.pagination_container_class} data-key="pagination_container_class">
-        <div class={@theme.pagination_info_class} data-key="pagination_info_class">
-          {dgettext("cinder", "showing %{start}-%{end} of %{total}", start: @range_start, end: @range_end, total: @total_count)}
-        </div>
-
-        <div :if={@page_size_config.configurable} class={@theme.page_size_container_class} data-key="page_size_container_class">
-          <.page_size_selector page_size_config={@page_size_config} theme={@theme} myself={@myself} id={@id} />
-        </div>
-
-        <div :if={@loading} data-pagination-state="loading" role="status">
+        <div
+          :if={@loading}
+          class={@theme.pagination_info_class}
+          data-key="pagination_info_class"
+          data-pagination-state="loading"
+          role="status"
+        >
           {dgettext("cinder", "Loading more items...")}
         </div>
 
@@ -304,6 +292,8 @@ defmodule Cinder.Renderers.Pagination do
         <div
           :if={@has_next and not @loading and not @error}
           id={"#{@id}-infinite-sentinel"}
+          class={@theme.pagination_info_class}
+          data-key="pagination_info_class"
           data-pagination-state="ready"
           data-infinite-prefetch-distance="viewport"
           phx-hook="CinderInfiniteSentinel"
@@ -319,8 +309,14 @@ defmodule Cinder.Renderers.Pagination do
           </button>
         </div>
 
-        <div :if={not @has_next and not @loading and not @error} data-pagination-state="end">
-          {dgettext("cinder", "All items loaded")}
+        <div
+          :if={not @has_next and not @loading and not @error}
+          class={@theme.pagination_info_class}
+          data-key="pagination_info_class"
+          data-pagination-state="end"
+          role="status"
+        >
+          {dgettext("cinder", "You have reached the end of this list")}
         </div>
       </div>
     </div>

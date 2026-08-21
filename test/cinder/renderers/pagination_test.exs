@@ -107,7 +107,10 @@ defmodule Cinder.Renderers.PaginationTest do
       assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
       assert html =~ ~s(data-infinite-prefetch-distance="viewport")
       refute html =~ ~s(phx-viewport-bottom="load_more")
-      assert html =~ "showing 1-10 of 100"
+      refute html =~ ~s(id="items-page-size-options")
+      refute html =~ "showing 1-10 of 100"
+      assert html =~ ~s(class="pagination-info")
+      assert html =~ ~s(data-key="pagination_info_class")
     end
 
     test "renders loading, retry, and end states without another sentinel" do
@@ -127,6 +130,11 @@ defmodule Cinder.Renderers.PaginationTest do
 
       end_html = render_component(&Pagination.render/1, ended)
       assert end_html =~ ~s(data-pagination-state="end")
+      assert end_html =~ "You have reached the end of this list"
+      assert end_html =~ ~s(class="pagination-info")
+      assert end_html =~ ~s(data-key="pagination_info_class")
+      refute end_html =~ ~s(id="items-page-size-options")
+      refute end_html =~ "showing"
       refute end_html =~ ~s(phx-hook="CinderInfiniteSentinel")
     end
   end

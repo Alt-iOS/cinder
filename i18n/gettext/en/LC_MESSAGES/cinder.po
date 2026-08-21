@@ -196,11 +196,6 @@ msgstr ""
 
 #: lib/cinder/renderers/pagination.ex
 #, elixir-autogen, elixir-format
-msgid "All items loaded"
-msgstr "All items loaded"
-
-#: lib/cinder/renderers/pagination.ex
-#, elixir-autogen, elixir-format
 msgid "Load more"
 msgstr "Load more"
 
@@ -223,3 +218,8 @@ msgstr "Load previous"
 #, elixir-autogen, elixir-format
 msgid "Page %{current}"
 msgstr "Page %{current}"
+
+#: lib/cinder/renderers/pagination.ex
+#, elixir-autogen, elixir-format
+msgid "You have reached the end of this list"
+msgstr "You have reached the end of this list"

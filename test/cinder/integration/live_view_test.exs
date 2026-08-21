@@ -270,7 +270,11 @@ defmodule Cinder.Integration.LiveViewTest do
       |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
       |> refute_has("tr[data-item-number=\"4\"]")
       |> assert_has("tr[data-item-number=\"10\"]")
-      |> assert_has("[data-pagination-mode=infinite]", text: "showing 5-10 of 10")
+      |> assert_has(
+        "[data-pagination-mode=infinite] [data-pagination-state=end][data-key=pagination_info_class]",
+        text: "You have reached the end of this list"
+      )
+      |> refute_has("[data-pagination-mode=infinite] [data-key=page_size_container_class]")
       |> assert_has("button[phx-click=load_previous]", text: "Load previous")
       |> unwrap(fn view ->
         view

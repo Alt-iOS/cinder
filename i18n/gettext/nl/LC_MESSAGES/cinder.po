@@ -196,11 +196,6 @@ msgstr "Er is een fout opgetreden bij het laden van gegevens"
 
 #: lib/cinder/renderers/pagination.ex
 #, elixir-autogen, elixir-format
-msgid "All items loaded"
-msgstr "Alle items zijn geladen"
-
-#: lib/cinder/renderers/pagination.ex
-#, elixir-autogen, elixir-format
 msgid "Load more"
 msgstr "Meer laden"
 
@@ -223,3 +218,8 @@ msgstr "Vorige laden"
 #, elixir-autogen, elixir-format
 msgid "Page %{current}"
 msgstr "Pagina %{current}"
+
+#: lib/cinder/renderers/pagination.ex
+#, elixir-autogen, elixir-format
+msgid "You have reached the end of this list"
+msgstr "Je hebt het einde van deze lijst bereikt"

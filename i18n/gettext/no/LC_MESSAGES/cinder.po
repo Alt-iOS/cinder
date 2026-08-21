@@ -196,11 +196,6 @@ msgstr "Det oppstod en feil under lasting av data"
 
 #: lib/cinder/renderers/pagination.ex
 #, elixir-autogen, elixir-format
-msgid "All items loaded"
-msgstr "Alle elementer er lastet"
-
-#: lib/cinder/renderers/pagination.ex
-#, elixir-autogen, elixir-format
 msgid "Load more"
 msgstr "Last inn flere"
 
@@ -223,3 +218,8 @@ msgstr "Last inn forrige"
 #, elixir-autogen, elixir-format
 msgid "Page %{current}"
 msgstr "Side %{current}"
+
+#: lib/cinder/renderers/pagination.ex
+#, elixir-autogen, elixir-format
+msgid "You have reached the end of this list"
+msgstr "Du har nådd slutten av listen"
