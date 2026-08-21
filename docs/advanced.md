@@ -457,13 +457,15 @@ Infinite collections use Cinder's LiveView hook to synchronize selection styling
 
 ```javascript
 // vite.config.mjs
-import { resolve } from "node:path"
+import { fileURLToPath, URL } from "node:url"
 
 resolve: {
   alias: {
-    cinder_hooks: resolve(
-      process.env.MIX_BUILD_PATH,
-      "lib/cinder/priv/static/cinder_hooks.js"
+    cinder_hooks: fileURLToPath(
+      new URL(
+        "../deps/cinder/priv/static/cinder_hooks.js",
+        import.meta.url
+      )
     )
   }
 }

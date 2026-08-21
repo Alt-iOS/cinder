@@ -83,7 +83,7 @@ defmodule Cinder.MixProject do
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url, "Website" => "https://cinder.sevenseacat.net"},
       files:
-        ~w(lib priv/cinder.css priv/themes i18n .formatter.exs mix.exs README.md CHANGELOG.md LICENSE usage-rules.md)
+        ~w(lib priv i18n .formatter.exs mix.exs README.md CHANGELOG.md LICENSE usage-rules.md)
     ]
   end
 
