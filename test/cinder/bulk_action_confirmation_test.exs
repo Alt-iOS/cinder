@@ -76,12 +76,13 @@ defmodule Cinder.BulkActionConfirmationTest do
 
       assert socket.assigns.bulk_action_confirmation.index == 0
       assert socket.assigns.bulk_action_confirmation.selected_ids == @context.selected_ids
+      attempt = socket.assigns.bulk_action_confirmation.attempt
       refute Map.has_key?(socket.assigns.bulk_action_confirmation, :data)
       refute Map.has_key?(socket.assigns.bulk_action_confirmation, :error)
 
       assert {:noreply, socket} =
                LiveComponent.handle_async(
-                 {:bulk_action_confirmation, 0},
+                 {:bulk_action_confirmation, 0, attempt},
                  {:ok, {:ok, ["one", "two"]}},
                  socket
                )
@@ -110,9 +111,11 @@ defmodule Cinder.BulkActionConfirmationTest do
       assert {:noreply, socket} =
                LiveComponent.handle_event("bulk_action_prepare", %{"index" => 0}, socket)
 
+      attempt = socket.assigns.bulk_action_confirmation.attempt
+
       assert {:noreply, socket} =
                LiveComponent.handle_async(
-                 {:bulk_action_confirmation, 0},
+                 {:bulk_action_confirmation, 0, attempt},
                  {:ok, {:error, :unavailable}},
                  socket
                )
@@ -123,11 +126,11 @@ defmodule Cinder.BulkActionConfirmationTest do
     end
 
     test "ignores stale preparation results" do
-      socket = socket(%{bulk_action_confirmation: confirmation(:current)})
+      socket = socket(%{bulk_action_confirmation: confirmation(:current, nil, make_ref())})
 
       assert {:noreply, unchanged} =
                LiveComponent.handle_async(
-                 {:bulk_action_confirmation, 1},
+                 {:bulk_action_confirmation, 1, make_ref()},
                  {:ok, {:ok, :stale}},
                  socket
                )
@@ -137,19 +140,98 @@ defmodule Cinder.BulkActionConfirmationTest do
     end
 
     test "ignores preparation results after cancellation" do
-      socket = socket(%{bulk_action_confirmation: confirmation(:current)})
+      attempt = make_ref()
+      socket = socket(%{bulk_action_confirmation: confirmation(:current, nil, attempt)})
 
       assert {:noreply, socket} =
                LiveComponent.handle_event("bulk_action_cancel", %{}, socket)
 
       assert {:noreply, socket} =
                LiveComponent.handle_async(
-                 {:bulk_action_confirmation, 0},
+                 {:bulk_action_confirmation, 0, attempt},
                  {:ok, {:ok, :late}},
                  socket
                )
 
       assert socket.assigns.bulk_action_confirmation == nil
+    end
+
+    test "does not start preparation twice while an attempt is running" do
+      socket =
+        socket(%{
+          bulk_action_slots: [
+            %{
+              action: :destroy,
+              confirmation: :slot,
+              prepare_confirmation: fn _context -> :prepared end
+            }
+          ]
+        })
+
+      assert {:noreply, socket} =
+               LiveComponent.handle_event("bulk_action_prepare", %{"index" => 0}, socket)
+
+      assert {:noreply, unchanged} =
+               LiveComponent.handle_event("bulk_action_prepare", %{"index" => 0}, socket)
+
+      assert unchanged.assigns.bulk_action_confirmation ==
+               socket.assigns.bulk_action_confirmation
+    end
+
+    test "ignores a late result from an earlier attempt for the same action" do
+      socket =
+        socket(%{
+          bulk_action_slots: [
+            %{
+              action: :destroy,
+              confirmation: :slot,
+              prepare_confirmation: fn _context -> :fresh end
+            }
+          ]
+        })
+
+      assert {:noreply, first_attempt_socket} =
+               LiveComponent.handle_event("bulk_action_prepare", %{"index" => 0}, socket)
+
+      first_attempt = first_attempt_socket.assigns.bulk_action_confirmation.attempt
+
+      assert {:noreply, cancelled_socket} =
+               LiveComponent.handle_event("bulk_action_cancel", %{}, first_attempt_socket)
+
+      assert {:noreply, second_attempt_socket} =
+               LiveComponent.handle_event(
+                 "bulk_action_prepare",
+                 %{"index" => 0},
+                 cancelled_socket
+               )
+
+      second_attempt = second_attempt_socket.assigns.bulk_action_confirmation.attempt
+      refute first_attempt == second_attempt
+
+      assert {:noreply, unchanged} =
+               LiveComponent.handle_async(
+                 {:bulk_action_confirmation, 0, first_attempt},
+                 {:ok, {:ok, :stale}},
+                 second_attempt_socket
+               )
+
+      refute Map.has_key?(unchanged.assigns.bulk_action_confirmation, :data)
+    end
+
+    test "ignores direct execution for actions that require slot confirmation" do
+      action = fn _query, _opts -> send(self(), :executed) end
+
+      socket =
+        socket(%{
+          query: SearchTestResource,
+          bulk_action_slots: [%{action: action, confirmation: :slot}]
+        })
+
+      assert {:noreply, unchanged} =
+               LiveComponent.handle_event("bulk_action_execute", %{"index" => 0}, socket)
+
+      assert unchanged.assigns.selected_ids == @context.selected_ids
+      refute_received :executed
     end
 
     test "ignores confirmation before preparation succeeds" do
@@ -316,8 +398,14 @@ defmodule Cinder.BulkActionConfirmationTest do
     [%{inner_block: fn _assigns, _context -> "Confirmation" end}]
   end
 
-  defp confirmation(data, error \\ nil) do
-    confirmation = %{index: 0, selected_ids: @context.selected_ids, data: data}
+  defp confirmation(data, error \\ nil, attempt \\ make_ref()) do
+    confirmation = %{
+      index: 0,
+      attempt: attempt,
+      selected_ids: @context.selected_ids,
+      data: data
+    }
+
     if error, do: Map.put(confirmation, :error, error), else: confirmation
   end
 end

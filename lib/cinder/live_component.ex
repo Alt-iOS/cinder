@@ -425,17 +425,22 @@ defmodule Cinder.LiveComponent do
     slots = socket.assigns[:bulk_action_slots] || []
     slot = Enum.at(slots, index)
 
-    if slot do
-      selected_ids =
-        case socket.assigns[:bulk_action_confirmation] do
-          %{index: ^index, selected_ids: selected_ids} -> selected_ids
-          _ -> socket.assigns.selected_ids
-        end
+    cond do
+      is_nil(slot) ->
+        Logger.warning("Cinder: Bulk action slot not found at index #{index}")
+        {:noreply, socket}
 
-      execute_bulk_action(slot, selected_ids, socket)
-    else
-      Logger.warning("Cinder: Bulk action slot not found at index #{index}")
-      {:noreply, socket}
+      slot[:confirmation] == :slot ->
+        {:noreply, socket}
+
+      true ->
+        selected_ids =
+          case socket.assigns[:bulk_action_confirmation] do
+            %{index: ^index, selected_ids: selected_ids} -> selected_ids
+            _ -> socket.assigns.selected_ids
+          end
+
+        execute_bulk_action(slot, selected_ids, socket)
     end
   end
 
@@ -463,8 +468,11 @@ defmodule Cinder.LiveComponent do
   def handle_event("bulk_action_prepare", %{"index" => index}, socket) do
     slots = socket.assigns[:bulk_action_slots] || []
 
-    if slot = Enum.at(slots, index) do
-      selected_ids = socket.assigns.selected_ids
+    with slot when not is_nil(slot) <- Enum.at(slots, index),
+         false <- preparation_running?(socket.assigns[:bulk_action_confirmation], index),
+         selected_ids <- socket.assigns.selected_ids,
+         true <- MapSet.size(selected_ids) > 0 do
+      attempt = make_ref()
 
       context = %{
         selected_ids: selected_ids,
@@ -474,6 +482,7 @@ defmodule Cinder.LiveComponent do
 
       confirmation = %{
         index: index,
+        attempt: attempt,
         selected_ids: selected_ids
       }
 
@@ -481,17 +490,21 @@ defmodule Cinder.LiveComponent do
 
       case slot[:prepare_confirmation] do
         nil ->
-          {:noreply, put_confirmation_result(socket, index, {:ok, nil})}
+          {:noreply, put_confirmation_result(socket, index, attempt, {:ok, nil})}
 
         callback ->
           {:noreply,
-           start_async(socket, {:bulk_action_confirmation, index}, fn ->
+           start_async(socket, {:bulk_action_confirmation, index, attempt}, fn ->
              Cinder.BulkActionConfirmation.prepare(callback, context)
            end)}
       end
     else
-      Logger.warning("Cinder: Bulk action slot not found at index #{index}")
-      {:noreply, socket}
+      nil ->
+        Logger.warning("Cinder: Bulk action slot not found at index #{index}")
+        {:noreply, socket}
+
+      _ignored ->
+        {:noreply, socket}
     end
   end
 
@@ -640,9 +653,15 @@ defmodule Cinder.LiveComponent do
     {:noreply, socket}
   end
 
-  defp put_confirmation_result(socket, index, result) do
+  defp preparation_running?(%{index: index} = confirmation, index) do
+    not Map.has_key?(confirmation, :data) and not Map.has_key?(confirmation, :error)
+  end
+
+  defp preparation_running?(_confirmation, _index), do: false
+
+  defp put_confirmation_result(socket, index, attempt, result) do
     case socket.assigns[:bulk_action_confirmation] do
-      %{index: ^index} = confirmation ->
+      %{index: ^index, attempt: ^attempt} = confirmation ->
         confirmation =
           case result do
             {:ok, data} -> Map.put(confirmation, :data, data)
@@ -717,20 +736,20 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_async(
-        {:bulk_action_confirmation, index},
+        {:bulk_action_confirmation, index, attempt},
         {:ok, result},
         socket
       ) do
-    {:noreply, put_confirmation_result(socket, index, result)}
+    {:noreply, put_confirmation_result(socket, index, attempt, result)}
   end
 
   @impl true
   def handle_async(
-        {:bulk_action_confirmation, index},
+        {:bulk_action_confirmation, index, attempt},
         {:exit, reason},
         socket
       ) do
-    {:noreply, put_confirmation_result(socket, index, {:error, reason})}
+    {:noreply, put_confirmation_result(socket, index, attempt, {:error, reason})}
   end
 
   def handle_async(:load_data, {:ok, {{:ok, page}, query}}, socket) do
