@@ -20,4 +20,19 @@ defmodule Cinder.Renderers.InfiniteStreamTest do
     assert html =~ "selected"
     assert html =~ "ring-2"
   end
+
+  test "encodes only selected IDs retained by the bounded browser window" do
+    html =
+      render_component(&InfiniteStream.selection_sync/1,
+        id: "products",
+        selected_ids: MapSet.new(["product-1", "product-2", "outside-window"]),
+        visible_ids: MapSet.new(["product-1", "product-2", "not-selected"]),
+        selected_classes: ["selected"]
+      )
+
+    assert html =~ "product-1"
+    assert html =~ "product-2"
+    refute html =~ "outside-window"
+    refute html =~ "not-selected"
+  end
 end

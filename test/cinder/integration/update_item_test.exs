@@ -566,6 +566,34 @@ defmodule Cinder.Integration.UpdateItemTest do
       assert updated_socket.assigns.selection_scope_ids == MapSet.new(["visible", "retained"])
       refute_receive {:selection_changed, _payload}
     end
+
+    test "deselects virtual rows without pruning the stream or retained window metadata" do
+      socket =
+        make_infinite_socket(%{
+          selected_ids: MapSet.new(["1", "2", "off-page"]),
+          selection_scope_ids: MapSet.new(["1", "2", "off-page"]),
+          on_selection_change: :selection_changed
+        })
+        |> Phoenix.LiveView.stream(:items, [])
+
+      {:ok, updated_socket} =
+        LiveComponent.update(%{__deselect_items__: [2, "off-page"]}, socket)
+
+      assert updated_socket.assigns.selected_ids == MapSet.new(["1"])
+      assert updated_socket.assigns.selection_scope_ids == MapSet.new(["1", "2", "off-page"])
+      assert updated_socket.assigns.infinite_item_ids == MapSet.new(["1", "2"])
+      assert updated_socket.assigns.infinite_selectable_ids == MapSet.new(["1", "2"])
+      assert updated_socket.assigns.infinite_loaded_count == 2
+      assert updated_socket.assigns.infinite_range_start == 7
+      assert updated_socket.assigns.infinite_range_end == 8
+      assert Enum.map(hd(updated_socket.assigns.infinite_pages).items, & &1.id) == ["1", "2"]
+      assert updated_socket.assigns.streams.items.deletes == []
+
+      assert_receive {:selection_changed,
+                      %{action: :deselect, selected_ids: selected_ids, selected_count: 1}}
+
+      assert selected_ids == MapSet.new(["1"])
+    end
   end
 
   describe "LiveComponent update/2 with __update_item_if_visible__" do

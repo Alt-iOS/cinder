@@ -32,14 +32,21 @@ defmodule Cinder.Renderers.InfiniteStream do
 
   attr :id, :string, required: true
   attr :selected_ids, :any, required: true
+  attr :visible_ids, :any, default: nil
   attr :selected_classes, :list, default: []
 
   def selection_sync(assigns) do
+    selected_ids =
+      case assigns.visible_ids do
+        %MapSet{} = visible_ids -> MapSet.intersection(assigns.selected_ids, visible_ids)
+        _ -> assigns.selected_ids
+      end
+
     assigns =
       assigns
       |> assign(
         :encoded_selected_ids,
-        Jason.encode!(assigns.selected_ids |> MapSet.to_list() |> Enum.sort())
+        Jason.encode!(selected_ids |> MapSet.to_list() |> Enum.sort())
       )
       |> assign(:encoded_selected_classes, Jason.encode!(assigns.selected_classes))
 

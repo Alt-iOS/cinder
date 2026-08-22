@@ -320,8 +320,8 @@ first bounded window; it does not load the entire result set into server memory.
 - If the item is not found in the current page, the update is silently ignored.
 - Infinite stream transforms must preserve the collection's configured ID field.
 
-For notification-driven changes that require a full requery, keep the current
-rows visible while their replacement loads with a silent asynchronous refresh:
+When an externally observed change requires a full requery, keep the current rows
+visible while their replacement loads with a silent asynchronous refresh:
 
 ```elixir
 def handle_info(%Ash.Notifier.Notification{}, socket) do
@@ -656,6 +656,18 @@ Every selectable table, grid, and list renders a select-all control. It selects
 every selectable record matched by the collection's current query, filters, and
 search—not only the rendered page. The lookup runs asynchronously and uses the
 same actor, tenant, scope, action, and query options as the collection.
+
+For `selectable={true}`, Cinder derives an ID-only query from that complete
+filtered scope: display loads and result sorting are removed, and IDs are read
+in bounded batches. A predicate such as `selectable={&(&1.status == :active)}`
+still needs the action's row data to evaluate the function, but Cinder also
+consumes those records in bounded batches instead of loading the entire result
+set at once.
+
+Infinite collections retain the complete selected-ID set on the server but
+synchronize only its intersection with the bounded browser window. The browser
+patch therefore stays proportional to `window_size`, not the complete filtered
+selection.
 
 Selected IDs are stored in a `MapSet`, preventing duplicates and allowing bulk
 actions to operate on the complete filtered selection. Pagination and sorting

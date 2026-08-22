@@ -43,6 +43,7 @@ defmodule Cinder.Renderers.Table do
         :if={@pagination_mode == :infinite}
         id={@id}
         selected_ids={@selected_ids}
+        visible_ids={Map.get(assigns, :infinite_item_ids)}
         selected_classes={InfiniteStream.selected_classes(Map.get(@theme, :selected_row_class))}
       />
       <!-- Filter Controls (including search) -->

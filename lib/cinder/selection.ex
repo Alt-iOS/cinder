@@ -70,11 +70,28 @@ defmodule Cinder.Selection do
 
   @doc false
   def filtered_ids(resource_or_query, options, id_field, selectable) do
-    with {:ok, query} <- Cinder.QueryBuilder.build_query(resource_or_query, options),
-         {:ok, records} <- Cinder.QueryBuilder.read_all(query, options) do
-      {:ok, page_ids(records, id_field, selectable)}
+    with {:ok, query} <- Cinder.QueryBuilder.build_query(resource_or_query, options) do
+      query
+      |> selection_query(id_field, selectable)
+      |> Cinder.QueryBuilder.stream_reduce(options, MapSet.new(), fn record, selected_ids ->
+        if item_selectable?(selectable, record) do
+          MapSet.put(selected_ids, to_string(Map.get(record, id_field)))
+        else
+          selected_ids
+        end
+      end)
     end
   end
+
+  @doc false
+  def selection_query(query, id_field, true) do
+    query
+    |> Ash.Query.unset([:load, :select, :sort, :distinct_sort, :limit, :offset, :page])
+    |> Ash.Query.select([id_field], replace?: true)
+    |> Ash.Query.sort([{id_field, :asc}])
+  end
+
+  def selection_query(query, _id_field, _selectable), do: query
 
   @doc """
   Returns `:none`, `:some`, or `:all` for the selectable visible items.
