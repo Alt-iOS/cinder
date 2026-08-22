@@ -12,6 +12,8 @@ defmodule Cinder.Integration.LiveViewTest do
   use Cinder.ConnCase, async: false
   require Ash.Query
 
+  require Ash.Query
+
   # The collection markup under test. The fixture LiveView has no logic of its
   # own — this function supplies the template, so what's exercised is real
   # Cinder, not test scaffolding.
@@ -59,6 +61,25 @@ defmodule Cinder.Integration.LiveViewTest do
     >
       <:col :let={album} field="title">{album.title}</:col>
       <:bulk_action action={fn selected_query, _opts -> {:ok, selected_query} end} label="Archive ({count})" />
+    </Cinder.collection>
+    """
+  end
+
+  defp empty_infinite_album_collection(assigns) do
+    query = Ash.Query.filter(Cinder.Integration.Album, title == "No album has this title")
+
+    assigns = assign(assigns, :query, query)
+
+    ~H"""
+    <Cinder.collection
+      id="empty-infinite-albums"
+      query={@query}
+      pagination={:infinite}
+      page_size={3}
+      window_size={6}
+      overscan={0}
+    >
+      <:col :let={album} field="title">{album.title}</:col>
     </Cinder.collection>
     """
   end
@@ -176,6 +197,14 @@ defmodule Cinder.Integration.LiveViewTest do
       |> assert_has("td", text: "Dirt")
       |> assert_has("td", text: "Blue Train")
       |> assert_has("td", text: "Pop Hits Vol 1")
+    end
+
+    test "empty infinite collection displays the existing empty state", %{conn: conn} do
+      path = Cinder.TestLive.Fixture.register(&empty_infinite_album_collection/1)
+
+      conn
+      |> visit(path)
+      |> assert_has("[data-key=empty_class]", text: "No results found")
     end
   end
 

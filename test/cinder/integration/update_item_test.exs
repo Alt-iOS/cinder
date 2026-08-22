@@ -733,7 +733,7 @@ defmodule Cinder.Integration.UpdateItemTest do
       assert updated_socket.assigns.data == [%{uuid: "abc-123", value: "new", loaded: true}]
     end
 
-    test "updates a visible infinite-stream row from a raw notification record" do
+    test "updates a visible infinite-stream row from a raw incoming record" do
       socket = make_infinite_socket()
       raw_item = %{id: 2, name: "Fresh", selectable?: false}
 
@@ -875,7 +875,7 @@ defmodule Cinder.Integration.UpdateItemTest do
       assert updated_socket.assigns.data == [%{id: 1, value: "test"}]
     end
 
-    test "batch-updates only raw notification records in the infinite window" do
+    test "batch-updates only raw incoming records in the infinite window" do
       socket = make_infinite_socket()
 
       raw_items = [

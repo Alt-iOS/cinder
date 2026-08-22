@@ -228,3 +228,8 @@ msgstr "You have reached the end of this list"
 #, elixir-autogen, elixir-format
 msgid "Select all filtered items"
 msgstr "Select all filtered items"
+
+#: lib/cinder/renderers/pagination.ex
+#, elixir-autogen, elixir-format
+msgid "%{total} items"
+msgstr "%{total} items"
