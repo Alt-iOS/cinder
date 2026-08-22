@@ -74,6 +74,62 @@ defmodule Cinder.LiveComponent do
     {:ok, assign(socket, :data, updated_data)}
   end
 
+  def update(%{__remove_items__: ids}, socket) when is_list(ids) do
+    id_field = socket.assigns[:id_field] || :id
+    id_set = MapSet.new(ids, &to_string/1)
+
+    socket =
+      if infinite_mode?(socket) do
+        remove_infinite_items(socket, id_set)
+      else
+        updated_data =
+          Enum.reject(socket.assigns.data || [], fn item ->
+            MapSet.member?(id_set, to_string(Map.get(item, id_field)))
+          end)
+
+        assign(socket, :data, updated_data)
+      end
+
+    selected_ids = socket.assigns[:selected_ids] || MapSet.new()
+    updated_selected_ids = MapSet.difference(selected_ids, id_set)
+
+    updated_selection_scope_ids =
+      case socket.assigns[:selection_scope_ids] do
+        %MapSet{} = scope_ids -> MapSet.difference(scope_ids, id_set)
+        scope_ids -> scope_ids
+      end
+
+    socket =
+      socket
+      |> assign(:selected_ids, updated_selected_ids)
+      |> assign(:selection_scope_ids, updated_selection_scope_ids)
+
+    socket =
+      if MapSet.equal?(selected_ids, updated_selected_ids) do
+        socket
+      else
+        notify_selection_change(socket, :remove)
+      end
+
+    {:ok, socket}
+  end
+
+  def update(%{__deselect_items__: ids}, socket) when is_list(ids) do
+    id_set = MapSet.new(ids, &to_string/1)
+    selected_ids = socket.assigns[:selected_ids] || MapSet.new()
+    updated_selected_ids = MapSet.difference(selected_ids, id_set)
+    socket = assign(socket, :selected_ids, updated_selected_ids)
+
+    socket =
+      if MapSet.equal?(selected_ids, updated_selected_ids) do
+        socket
+      else
+        notify_selection_change(socket, :deselect)
+      end
+
+    {:ok, socket}
+  end
+
   # Single item update - raw item passed (has id field)
   def update(%{__update_item_if_visible__: {%{} = raw_item, update_fn}}, socket) do
     id_field = socket.assigns[:id_field] || :id
@@ -257,6 +313,89 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_pages, pages)
     |> assign(:infinite_selectable_ids, selectable_ids)
   end
+
+  defp remove_infinite_items(socket, id_set) do
+    removed_visible_ids = MapSet.intersection(socket.assigns.infinite_item_ids, id_set)
+
+    pages =
+      socket.assigns.infinite_pages
+      |> Enum.map(fn page ->
+        items = Enum.reject(page.items, &MapSet.member?(id_set, &1.id))
+        refresh_infinite_page_meta(page, items)
+      end)
+      |> Enum.reject(&(&1.items == []))
+
+    item_ids = pages |> Enum.flat_map(& &1.ids) |> MapSet.new()
+
+    selectable_ids =
+      pages
+      |> Enum.flat_map(& &1.selectable_ids)
+      |> MapSet.new()
+
+    first_page = List.first(pages)
+    last_page = List.last(pages)
+    {range_start, range_end} = infinite_range(pages, socket.assigns.page_size)
+
+    socket
+    |> maybe_stream_delete_items(removed_visible_ids)
+    |> assign(:infinite_pages, pages)
+    |> assign(:infinite_item_ids, item_ids)
+    |> assign(:infinite_selectable_ids, selectable_ids)
+    |> assign(:infinite_loaded_count, MapSet.size(item_ids))
+    |> assign(:infinite_range_start, range_start)
+    |> assign(:infinite_range_end, range_end)
+    |> assign(:first_keyset, first_page && first_page.first_keyset)
+    |> assign(:last_keyset, last_page && last_page.last_keyset)
+    |> prune_silent_refresh_removed_items(id_set)
+  end
+
+  defp prune_silent_refresh_removed_items(
+         %{assigns: %{silent_refresh_state: state}} = socket,
+         id_set
+       )
+       when is_map(state) do
+    pages =
+      state
+      |> Map.get(:infinite_pages, [])
+      |> Enum.map(fn page ->
+        items = Enum.reject(page.items, &MapSet.member?(id_set, &1.id))
+        refresh_infinite_page_meta(page, items)
+      end)
+      |> Enum.reject(&(&1.items == []))
+
+    item_ids = pages |> Enum.flat_map(& &1.ids) |> MapSet.new()
+    selectable_ids = pages |> Enum.flat_map(& &1.selectable_ids) |> MapSet.new()
+    first_page = List.first(pages)
+    last_page = List.last(pages)
+    {range_start, range_end} = infinite_range(pages, socket.assigns.page_size)
+
+    state =
+      Map.merge(state, %{
+        infinite_pages: pages,
+        infinite_item_ids: item_ids,
+        infinite_selectable_ids: selectable_ids,
+        infinite_loaded_count: MapSet.size(item_ids),
+        infinite_range_start: range_start,
+        infinite_range_end: range_end,
+        first_keyset: first_page && first_page.first_keyset,
+        last_keyset: last_page && last_page.last_keyset
+      })
+
+    assign(socket, :silent_refresh_state, state)
+  end
+
+  defp prune_silent_refresh_removed_items(socket, _id_set), do: socket
+
+  defp maybe_stream_delete_items(
+         %{private: %{lifecycle: _}, assigns: %{streams: %{items: _}}} = socket,
+         ids
+       ) do
+    Enum.reduce(ids, socket, fn id, socket ->
+      stream_delete_by_dom_id(socket, :items, "#{socket.assigns.id}-item-#{id}")
+    end)
+  end
+
+  defp maybe_stream_delete_items(socket, _ids), do: socket
 
   defp ensure_same_infinite_id!(item, expected_id, id_field) do
     if to_string(Map.get(item, id_field)) != expected_id do

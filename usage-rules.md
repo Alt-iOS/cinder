@@ -321,7 +321,7 @@ Keep current rows visible while an asynchronous requery runs:
 {:noreply, refresh_table(socket, "collection-id", silent: true)}
 ```
 
-### In-Memory Updates
+### In-Memory Changes
 
 For PubSub-driven updates without re-querying:
 
@@ -334,12 +334,24 @@ import Cinder.Update
 # Update multiple items
 {:noreply, update_items(socket, "table-id", user_ids, fn user -> %{user | active: false} end)}
 
+# Remove deleted items and prune their selection
+{:noreply, remove_item(socket, "table-id", user_id)}
+{:noreply, remove_items(socket, "table-id", user_ids)}
+
+# Keep rendered rows while removing IDs from Cinder's selection
+{:noreply, deselect_item(socket, "table-id", user_id)}
+{:noreply, deselect_items(socket, "table-id", user_ids)}
+
 # Only update if visible on current page (avoids unnecessary DB calls)
 {:noreply, update_if_visible(socket, "table-id", raw_user, fn raw ->
   {:ok, loaded} = Ash.load(raw, [:department])
   loaded
 end)}
 ```
+
+Removal does not backfill the page or recalculate pagination, aggregates,
+ordering, or filters. Follow it with `refresh_table/2` when the collection query
+must be reconciled.
 
 ## Custom Filters
 

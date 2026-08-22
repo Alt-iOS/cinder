@@ -215,6 +215,52 @@ defmodule MyAppWeb.UsersLive do
       %{user | active: false}
     end)}
   end
+
+  # Remove deleted items immediately
+  def handle_info({:user_deleted, user_id}, socket) do
+    {:noreply, remove_item(socket, "users-table", user_id)}
+  end
+end
+```
+
+#### Targeted Removal and Deselection
+
+Use `remove_item/3` or `remove_items/3` when the application identifies records
+that no longer belong in the collection. Cinder removes matching rendered items,
+prunes their IDs from the collection selection, and sends `on_selection_change`
+with `action: :remove` if the selection changed.
+
+Use `deselect_item/3` or `deselect_items/3` when an item should remain visible
+but must no longer participate in the current operation. Cinder leaves the row
+and filtered select-all scope intact, removes matching IDs from the selection,
+and sends `on_selection_change` with `action: :deselect` when needed:
+
+```elixir
+def handle_info({:product_unavailable, product_id}, socket) do
+  {:noreply, deselect_item(socket, "products-table", product_id)}
+end
+```
+
+Removal is an in-memory projection change. It does not backfill the current page
+or recalculate pagination totals, aggregates, ordering, or filters. Follow it
+with `refresh_table/2` when the query must be reconciled:
+
+```elixir
+def handle_info({:user_deleted, user_id}, socket) do
+  socket = remove_item(socket, "users-table", user_id)
+  {:noreply, refresh_table(socket, "users-table")}
+end
+```
+
+Infinite collections remove matching rows from the client stream and its bounded
+metadata window. Removed IDs are also pruned from filtered select-all state even
+when the row is outside the retained window. To keep the remaining rows visible
+while Cinder reconciles the query, combine removal with a silent refresh:
+
+```elixir
+def handle_info({:user_deleted, user_id}, socket) do
+  socket = remove_item(socket, "users-table", user_id)
+  {:noreply, refresh_table(socket, "users-table", silent: true)}
 end
 ```
 
@@ -268,7 +314,9 @@ first bounded window; it does not load the entire result set into server memory.
 #### Caveats
 
 - These functions modify in-memory data only. Computed fields, aggregates, and calculations from the database will NOT be recalculated.
-- For changes that affect derived data, use `refresh_table/2` instead.
+- Removing items does not backfill the page or recalculate pagination totals.
+- For changes that affect derived data, ordering, filtering, or pagination, call
+  `refresh_table/2` after applying the in-memory change.
 - If the item is not found in the current page, the update is silently ignored.
 - Infinite stream transforms must preserve the collection's configured ID field.
 
@@ -834,7 +882,7 @@ You can also track selection state in your parent LiveView. This is not necessar
 ```elixir
 def handle_info({:selection_changed, payload}, socket) do
   # payload contains: %{selected_ids, selected_count, component_id, action}
-  # action is one of: :select, :deselect, :select_all, :clear
+  # action is one of: :toggle, :select_all, :clear, :remove, :deselect
   {:noreply, assign(socket, :selected_count, payload.selected_count)}
 end
 ```
