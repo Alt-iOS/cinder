@@ -63,6 +63,49 @@ defmodule Cinder.LiveComponent do
     {:ok, assign(socket, :data, updated_data)}
   end
 
+  def update(%{__remove_items__: ids}, socket) when is_list(ids) do
+    id_field = socket.assigns[:id_field] || :id
+    id_set = MapSet.new(ids, &to_string/1)
+
+    updated_data =
+      Enum.reject(socket.assigns.data || [], fn item ->
+        MapSet.member?(id_set, to_string(Map.get(item, id_field)))
+      end)
+
+    selected_ids = socket.assigns[:selected_ids] || MapSet.new()
+    updated_selected_ids = MapSet.difference(selected_ids, id_set)
+
+    socket =
+      socket
+      |> assign(:data, updated_data)
+      |> assign(:selected_ids, updated_selected_ids)
+
+    socket =
+      if MapSet.equal?(selected_ids, updated_selected_ids) do
+        socket
+      else
+        notify_selection_change(socket, :remove)
+      end
+
+    {:ok, socket}
+  end
+
+  def update(%{__deselect_items__: ids}, socket) when is_list(ids) do
+    id_set = MapSet.new(ids, &to_string/1)
+    selected_ids = socket.assigns[:selected_ids] || MapSet.new()
+    updated_selected_ids = MapSet.difference(selected_ids, id_set)
+    socket = assign(socket, :selected_ids, updated_selected_ids)
+
+    socket =
+      if MapSet.equal?(selected_ids, updated_selected_ids) do
+        socket
+      else
+        notify_selection_change(socket, :deselect)
+      end
+
+    {:ok, socket}
+  end
+
   # Single item update - raw item passed (has id field)
   def update(%{__update_item_if_visible__: {%{} = raw_item, update_fn}}, socket) do
     id_field = socket.assigns[:id_field] || :id
