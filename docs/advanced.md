@@ -249,9 +249,9 @@ to the browser without adding it to socket assigns. ID-only update calls are a
 safe no-op for infinite collections because there is no retained record to pass
 to the callback.
 
-For Ash notifications, subscribe in the parent LiveView and pass the notification's
-record to `update_if_visible/4`. Cinder intentionally does not prescribe a PubSub
-topic or notification envelope:
+When your application receives an updated record—for example through PubSub or
+Ash.Notifier—pass it to `update_if_visible/4`. Cinder intentionally does not
+prescribe how the update reaches the parent LiveView:
 
 ```elixir
 def handle_info(%Ash.Notifier.Notification{data: user, action: %{type: :update}}, socket) do
@@ -259,7 +259,7 @@ def handle_info(%Ash.Notifier.Notification{data: user, action: %{type: :update}}
 end
 ```
 
-Use `refresh_table/2` for create/destroy notifications and for updates that can
+Use `refresh_table/2` for creates, removals, and updates that can
 change filters, sorting, keyset position, derived values, or numbering. In
 infinite mode, refresh clears the current client stream and requeries only the
 first bounded window; it does not load the entire result set into server memory.
@@ -413,6 +413,7 @@ Use `query_opts` to load only needed data:
   resource={MyApp.User}
   actor={@current_user}
   pagination={:keyset}
+  count={:async}
 >
   ...
 </Cinder.collection>
@@ -449,7 +450,17 @@ Individual collections can still override with the `page_size` attribute.
 
 - **Offset** (default): Traditional page numbers, allows jumping to any page. Can be slow on large datasets.
 - **Keyset**: Cursor-based previous/next navigation. Much faster on large datasets but cannot jump to a page whose cursor has not been visited. Cinder displays the sequential current page number and tracks record numbers so both remain meaningful while navigating in either direction.
-- **Infinite**: Streams unique keyset batches into the browser as an upcoming sentinel enters a one-viewport prefetch margin, so loading begins before the user reaches the rendered edge. Its footer shows only the current loading, retry, or end-of-list status; it does not render the ordinary pagination range or page-size selector. A “Load more” button remains available as an accessible fallback. The records themselves are released from LiveView socket state after render, and `window_size` bounds the records retained in the browser DOM; advancing past that window exposes a “Load previous” sentinel. Loading and retry states do not hide the retained window, and the end state cannot request another batch. Filtering, sorting, page-size changes, and refresh restart from the first batch.
+- **Infinite**: Streams unique keyset batches into the browser as an upcoming sentinel enters a one-viewport prefetch margin, so loading begins before the user reaches the rendered edge. Its footer shows loading, retry, or end-of-list status and, when exact counting is explicitly enabled, the total; it does not render the ordinary pagination range or page-size selector. A “Load more” button remains available as an accessible fallback. The records themselves are released from LiveView socket state after render, and `window_size` bounds the records retained in the browser DOM; advancing past that window exposes a “Load previous” sentinel. Loading and retry states do not hide the retained window, and the end state cannot request another batch. Filtering, sorting, page-size changes, and refresh restart from the first batch.
+
+**Total Counts:**
+
+Use the `count` attribute to control exact filtered totals independently from pagination:
+
+- `count={:sync}` waits for the exact count before rendering the page. This preserves the existing default for offset and keyset pagination.
+- `count={:async}` renders cursor navigation immediately from `more?`, then calculates and displays the exact total separately. The result is reused while navigating the same filtered query.
+- `count={false}` never calculates or displays an exact total. Previous/next and infinite sentinels use cursor state and `more?` instead.
+
+Infinite pagination defaults to `count={false}` because its loading and end states do not require a total. Set `count={:sync}` or `count={:async}` explicitly when an infinite collection needs the exact count. Offset and keyset pagination default to `count={:sync}` for backwards compatibility.
 
 For infinite pagination, `page_size` remains the Ash query batch size. `overscan` controls how many additional batches are prefetched (default `1`). `window_size` controls the client-side stream window and is rounded up to a whole number of batches; by default it is `page_size * (1 + 2 * overscan)`. For example, `page_size={25}`, `overscan={1}`, and `window_size={75}` load 25 records per query, prefetch one batch, and retain at most 75 rendered records. Cinder keeps cursor, page, ID, and selection metadata for the retained window, not the full record structs.
 

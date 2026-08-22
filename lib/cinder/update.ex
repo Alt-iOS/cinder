@@ -1,6 +1,6 @@
 defmodule Cinder.Update do
   @moduledoc """
-  Efficient notification-driven updates for Cinder collection data.
+  Efficient in-memory updates for Cinder collection data.
 
   This module provides functions to update individual items in a collection's
   data without triggering a full database re-query. This is useful for applying

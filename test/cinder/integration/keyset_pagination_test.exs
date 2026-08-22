@@ -107,6 +107,69 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       end
     end
 
+    test "can execute keyset and infinite pages without an exact count" do
+      base_options = [
+        actor: nil,
+        filters: %{},
+        sort_by: [{"position", :asc}],
+        page_size: 3,
+        current_page: 1,
+        columns: [],
+        query_opts: [],
+        pagination_mode: :keyset,
+        count_mode: false,
+        after_keyset: nil,
+        before_keyset: nil
+      ]
+
+      for pagination_mode <- [:keyset, :infinite] do
+        {:ok, page} =
+          QueryBuilder.build_and_execute(
+            TestItem,
+            Keyword.put(base_options, :pagination_mode, pagination_mode)
+          )
+
+        assert page.count == nil
+        assert page.more?
+        assert Enum.map(page.results, & &1.position) == [1, 2, 3]
+      end
+    end
+
+    test "async mode leaves counting to the LiveComponent and exposes a standalone count" do
+      options = [
+        actor: nil,
+        filters: %{},
+        sort_by: [{"position", :asc}],
+        page_size: 3,
+        current_page: 1,
+        columns: [],
+        query_opts: [],
+        pagination_mode: :keyset,
+        count_mode: :async,
+        after_keyset: nil,
+        before_keyset: nil
+      ]
+
+      {:ok, query} = QueryBuilder.build_query(TestItem, options)
+      {:ok, page} = QueryBuilder.execute(query, options)
+
+      assert page.count == nil
+      assert {:ok, 10} = QueryBuilder.count(query, options)
+    end
+
+    test "normalizes count defaults by pagination mode" do
+      assert Cinder.Collection.normalize_count_mode(nil, :offset) == :sync
+      assert Cinder.Collection.normalize_count_mode(nil, :keyset) == :sync
+      assert Cinder.Collection.normalize_count_mode(nil, :infinite) == false
+      assert Cinder.Collection.normalize_count_mode(:async, :infinite) == :async
+      assert Cinder.Collection.normalize_count_mode(:sync, :infinite) == :sync
+      assert Cinder.Collection.normalize_count_mode(false, :keyset) == false
+
+      assert_raise ArgumentError, fn ->
+        Cinder.Collection.normalize_count_mode(:eventually, :keyset)
+      end
+    end
+
     test "navigates forward with after cursor" do
       # First, get the first page to obtain a cursor
       first_page_options = [
@@ -522,6 +585,19 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert socket.assigns.current_page == 2
     end
 
+    test "preserves a disabled count mode" do
+      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
+
+      {:ok, socket} =
+        build_keyset_test_assigns()
+        |> Map.put(:count_mode, false)
+        |> then(&LiveComponent.update(&1, socket))
+
+      assert socket.assigns.count_mode == false
+      socket = Phoenix.LiveView.cancel_async(socket, :load_data)
+      assert socket.assigns.total_count == nil
+    end
+
     test "prev_page event sets before_keyset from first_keyset" do
       {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
       {:ok, socket} = LiveComponent.update(build_keyset_test_assigns(), socket)
@@ -707,6 +783,40 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert socket.assigns.infinite_loaded_count == 1
       assert socket.assigns.error
       assert socket.assigns.infinite_append?
+    end
+
+    test "an asynchronous count updates only its current attempt" do
+      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
+      {:ok, socket} = LiveComponent.update(build_keyset_test_assigns(), socket)
+      socket = Phoenix.LiveView.cancel_async(socket, :load_data)
+      current_attempt = make_ref()
+
+      socket =
+        Phoenix.Component.assign(socket,
+          count_mode: :async,
+          count_attempt: current_attempt,
+          total_count: nil
+        )
+
+      {:noreply, unchanged} =
+        LiveComponent.handle_async(
+          {:load_count, make_ref()},
+          {:ok, {:ok, 99}},
+          socket
+        )
+
+      assert unchanged.assigns.total_count == nil
+      assert unchanged.assigns.count_attempt == current_attempt
+
+      {:noreply, counted} =
+        LiveComponent.handle_async(
+          {:load_count, current_attempt},
+          {:ok, {:ok, 10}},
+          unchanged
+        )
+
+      assert counted.assigns.total_count == 10
+      assert counted.assigns.count_attempt == nil
     end
 
     test "change_page_size event clears keyset cursors" do

@@ -223,3 +223,8 @@ msgstr "Página %{current}"
 #, elixir-autogen, elixir-format
 msgid "You have reached the end of this list"
 msgstr "Has llegado al final de esta lista"
+
+#: lib/cinder/renderers/pagination.ex
+#, elixir-autogen, elixir-format
+msgid "%{total} items"
+msgstr "%{total} elementos"

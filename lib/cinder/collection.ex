@@ -172,6 +172,12 @@ defmodule Cinder.Collection do
       "Pagination mode: :offset (default), :keyset, or :infinite. Infinite pagination appends keyset batches as the viewport reaches the end."
   )
 
+  attr(:count, :any,
+    default: nil,
+    doc:
+      "Total-count mode: :sync, :async, or false. Defaults to :sync for offset/keyset pagination and false for infinite pagination."
+  )
+
   attr(:window_size, :integer,
     default: nil,
     doc:
@@ -436,6 +442,7 @@ defmodule Cinder.Collection do
 
     # Parse pagination mode
     pagination_mode = parse_pagination_mode(assigns.pagination)
+    count_mode = normalize_count_mode(assigns.count, pagination_mode)
 
     # Select renderer based on layout (support both atoms and strings)
     layout = normalize_layout(assigns.layout)
@@ -473,6 +480,7 @@ defmodule Cinder.Collection do
       |> assign(:show_filters, show_filters)
       |> assign(:show_sort, show_sort)
       |> assign(:pagination_mode, pagination_mode)
+      |> assign(:count_mode, count_mode)
       |> assign(:renderer, renderer)
       |> assign(:item_slot, item_slot)
       |> assign(:bulk_action_slots, bulk_action_slots)
@@ -526,6 +534,7 @@ defmodule Cinder.Collection do
         search_placeholder={@search_placeholder}
         search_fn={@search_fn}
         pagination_mode={@pagination_mode}
+        count_mode={@count_mode}
         window_size={@window_size}
         overscan={@overscan}
         show_item_numbers={@show_item_numbers}
@@ -945,6 +954,16 @@ defmodule Cinder.Collection do
   defp parse_pagination_mode("keyset"), do: :keyset
   defp parse_pagination_mode("infinite"), do: :infinite
   defp parse_pagination_mode(_invalid), do: :offset
+
+  @doc false
+  def normalize_count_mode(nil, :infinite), do: false
+  def normalize_count_mode(nil, _pagination_mode), do: :sync
+  def normalize_count_mode(mode, _pagination_mode) when mode in [:sync, :async, false], do: mode
+
+  def normalize_count_mode(mode, _pagination_mode) do
+    raise ArgumentError,
+          "invalid count mode #{inspect(mode)}; expected :sync, :async, or false"
+  end
 
   # ============================================================================
   # PRIVATE HELPERS - Theme

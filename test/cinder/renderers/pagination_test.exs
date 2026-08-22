@@ -87,6 +87,24 @@ defmodule Cinder.Renderers.PaginationTest do
       assert html =~ "Page 3"
       assert html =~ "showing 21-22 of 100"
     end
+
+    test "renders cursor navigation without a total count" do
+      assigns =
+        base_assigns("keyset-no-count")
+        |> Map.merge(%{
+          pagination_mode: :keyset,
+          current_page: 1,
+          total_count: nil,
+          page: %{base_assigns("unused").page | count: nil, more?: true}
+        })
+
+      html = render_component(&Pagination.render/1, assigns)
+
+      assert html =~ "Page 1"
+      assert html =~ "Next"
+      refute html =~ "showing"
+      refute html =~ " of "
+    end
   end
 
   describe "infinite pagination" do
@@ -106,11 +124,31 @@ defmodule Cinder.Renderers.PaginationTest do
       assert html =~ ~s(data-pagination-mode="infinite")
       assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
       assert html =~ ~s(data-infinite-prefetch-distance="viewport")
+      assert html =~ "100 items"
       refute html =~ ~s(phx-viewport-bottom="load_more")
       refute html =~ ~s(id="items-page-size-options")
       refute html =~ "showing 1-10 of 100"
       assert html =~ ~s(class="pagination-info")
       assert html =~ ~s(data-key="pagination_info_class")
+    end
+
+    test "renders infinite navigation when count is disabled" do
+      assigns =
+        base_assigns("items-no-count")
+        |> Map.merge(%{
+          pagination_mode: :infinite,
+          total_count: nil,
+          page: %{base_assigns("unused").page | count: nil, more?: true},
+          loaded_count: 10,
+          loading: false,
+          error: false
+        })
+
+      html = render_component(&Pagination.render/1, assigns)
+
+      assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
+      refute html =~ "showing"
+      refute html =~ ~s(data-pagination-state="counted")
     end
 
     test "renders loading, retry, and end states without another sentinel" do

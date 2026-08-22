@@ -65,6 +65,10 @@ defmodule Cinder.Table do
     default: :offset,
     doc: "Pagination mode: :offset, :keyset, or :infinite"
 
+  attr :count, :any,
+    default: nil,
+    doc: "Total-count mode: :sync, :async, or false. Infinite pagination defaults to false."
+
   attr :window_size, :integer,
     default: nil,
     doc: "Maximum browser DOM records retained for infinite pagination"

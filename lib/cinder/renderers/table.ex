@@ -234,6 +234,8 @@ defmodule Cinder.Renderers.Table do
         myself={@myself}
         show_pagination={@show_pagination}
         pagination_mode={@pagination_mode}
+        total_count={@total_count}
+        count_mode={@count_mode}
         current_page={@current_page}
         loaded_count={if(@pagination_mode == :infinite, do: @infinite_loaded_count, else: length(@data))}
         range_start={@infinite_range_start}

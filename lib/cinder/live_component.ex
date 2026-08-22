@@ -168,7 +168,7 @@ defmodule Cinder.LiveComponent do
   end
 
   # Infinite collections intentionally retain only IDs, cursors, numbering and
-  # selection metadata on the server. A full notification record is therefore
+  # selection metadata on the server. A full incoming record is therefore
   # required for a targeted update; ID-only updates remain a safe no-op.
   defp do_update_infinite_item_if_visible(socket, id, %{} = raw_item, update_fn, id_field) do
     normalized_id = to_string(id)
@@ -785,6 +785,7 @@ defmodule Cinder.LiveComponent do
       {:ok, page}
       |> handle_result(socket)
       |> maybe_notify_query_change(query)
+      |> maybe_start_async_count(query)
 
     {:noreply, socket}
   end
@@ -799,7 +800,19 @@ defmodule Cinder.LiveComponent do
     {:noreply, handle_result({:exit, reason}, socket)}
   end
 
+  @impl true
+  def handle_async({:load_count, attempt}, {:ok, result}, socket) do
+    {:noreply, apply_async_count_result(socket, attempt, result)}
+  end
+
+  @impl true
+  def handle_async({:load_count, attempt}, {:exit, reason}, socket) do
+    {:noreply, apply_async_count_result(socket, attempt, {:error, reason})}
+  end
+
   defp handle_result({:ok, page}, socket) do
+    socket = maybe_store_sync_count(socket, page)
+
     if socket.assigns.pagination_mode == :infinite do
       put_infinite_page(socket, page)
     else
@@ -982,6 +995,10 @@ defmodule Cinder.LiveComponent do
     |> Map.put(:first_keyset, items |> List.first() |> then(&(&1 && &1.keyset)))
     |> Map.put(:last_keyset, items |> List.last() |> then(&(&1 && &1.keyset)))
   end
+
+  defp update_infinite_pages(_pages, %{items: []}, :reset, _socket), do: {[], false}
+
+  defp update_infinite_pages(pages, %{items: []}, _direction, _socket), do: {pages, false}
 
   defp update_infinite_pages(_pages, page_meta, :reset, _socket), do: {[page_meta], false}
 
@@ -1311,6 +1328,10 @@ defmodule Cinder.LiveComponent do
     |> assign(:user_has_interacted, Map.get(socket.assigns, :user_has_interacted, false))
     # Keyset pagination state
     |> assign(:pagination_mode, pagination_mode)
+    |> assign(:count_mode, Map.get(assigns, :count_mode, :sync))
+    |> assign_new(:total_count, fn -> nil end)
+    |> assign_new(:count_query_state, fn -> nil end)
+    |> assign_new(:count_attempt, fn -> nil end)
     |> assign(:window_size, window_size)
     |> assign(:overscan, overscan)
     |> assign(:show_item_numbers, assigns[:show_item_numbers] || false)
@@ -1424,11 +1445,24 @@ defmodule Cinder.LiveComponent do
   # Note: actor, tenant, and scope are normalized separately to avoid
   # false positives from Ecto struct metadata differences.
   @data_keys ~w(filters sort_by current_page page_size search_term query query_opts after_keyset before_keyset)a
+  @count_keys ~w(filters search_term query query_opts action)a
 
   defp data_state(assigns) do
     base_state = Map.take(assigns, @data_keys)
 
     Map.merge(base_state, %{
+      count_mode: Map.get(assigns, :count_mode, :sync),
+      actor_id: normalize_auth(assigns[:actor]),
+      tenant_id: normalize_auth(assigns[:tenant]),
+      scope_id: normalize_scope(assigns[:scope])
+    })
+  end
+
+  defp count_query_state(assigns) do
+    base_state = Map.take(assigns, @count_keys)
+
+    Map.merge(base_state, %{
+      count_mode: Map.get(assigns, :count_mode, :sync),
       actor_id: normalize_auth(assigns[:actor]),
       tenant_id: normalize_auth(assigns[:tenant]),
       scope_id: normalize_scope(assigns[:scope])
@@ -1488,6 +1522,7 @@ defmodule Cinder.LiveComponent do
       columns: columns,
       search_term: search_term,
       pagination_mode: pagination_mode,
+      count_mode: count_mode,
       after_keyset: after_keyset,
       before_keyset: before_keyset
     } = socket.assigns
@@ -1513,15 +1548,17 @@ defmodule Cinder.LiveComponent do
       current_page: current_page,
       columns: query_columns,
       search_term: search_term,
-      search_fn: socket.assigns.search_fn,
+      search_fn: Map.get(socket.assigns, :search_fn),
       pagination_configured: socket.assigns.page_size_config.configurable || page_size != 25,
       # Keyset pagination options
       pagination_mode: pagination_mode,
+      count_mode: count_mode,
       after_keyset: after_keyset,
       before_keyset: before_keyset
     ]
 
     socket
+    |> prepare_count_for_load()
     |> assign(:loading, true)
     |> assign(:error, false)
     |> then(fn socket ->
@@ -1536,6 +1573,7 @@ defmodule Cinder.LiveComponent do
               |> Cinder.QueryBuilder.execute(options)
               |> handle_result(socket)
               |> maybe_notify_query_change(prepared_query)
+              |> maybe_start_async_count(prepared_query)
 
             {:error, _} = error ->
               handle_result(error, socket)
@@ -1555,5 +1593,67 @@ defmodule Cinder.LiveComponent do
         end)
       end
     end)
+  end
+
+  defp prepare_count_for_load(socket) do
+    state = count_query_state(socket.assigns)
+
+    if socket.assigns.count_query_state == state do
+      socket
+    else
+      assign(socket, total_count: nil, count_query_state: state, count_attempt: nil)
+    end
+  end
+
+  defp maybe_store_sync_count(%{assigns: %{count_mode: :sync}} = socket, page) do
+    assign(socket, :total_count, Map.get(page, :count))
+  end
+
+  defp maybe_store_sync_count(socket, _page), do: socket
+
+  defp maybe_start_async_count(%{assigns: %{count_mode: :async}} = socket, %Ash.Query{} = query) do
+    if is_integer(socket.assigns.total_count) or socket.assigns.count_attempt do
+      socket
+    else
+      attempt = make_ref()
+      socket = assign(socket, :count_attempt, attempt)
+      options = count_query_options(socket)
+
+      if Application.get_env(:ash, :disable_async?) do
+        apply_async_count_result(
+          socket,
+          attempt,
+          Cinder.QueryBuilder.count(query, options)
+        )
+      else
+        start_async(socket, {:load_count, attempt}, fn ->
+          Cinder.QueryBuilder.count(query, options)
+        end)
+      end
+    end
+  end
+
+  defp maybe_start_async_count(socket, _query), do: socket
+
+  defp apply_async_count_result(socket, attempt, {:ok, count})
+       when socket.assigns.count_attempt == attempt do
+    assign(socket, total_count: count, count_attempt: nil)
+  end
+
+  defp apply_async_count_result(socket, attempt, {:error, reason})
+       when socket.assigns.count_attempt == attempt do
+    Logger.warning("Cinder count query failed: #{inspect(reason)}")
+    assign(socket, :count_attempt, nil)
+  end
+
+  defp apply_async_count_result(socket, _attempt, _result), do: socket
+
+  defp count_query_options(socket) do
+    [
+      actor: socket.assigns.actor,
+      tenant: socket.assigns.tenant,
+      scope: Map.get(socket.assigns, :scope),
+      query_opts: socket.assigns.query_opts
+    ]
   end
 end
