@@ -518,6 +518,13 @@ every selectable record matched by the collection's current query, filters, and
 search—not only the rendered page. The lookup runs asynchronously and uses the
 same actor, tenant, scope, action, and query options as the collection.
 
+For `selectable={true}`, Cinder derives an ID-only query from that complete
+filtered scope: display loads and result sorting are removed, and IDs are read
+in bounded batches. A predicate such as `selectable={&(&1.status == :active)}`
+still needs the action's row data to evaluate the function, but Cinder also
+consumes those records in bounded batches instead of loading the entire result
+set at once.
+
 Selected IDs are stored in a `MapSet`, preventing duplicates and allowing bulk
 actions to operate on the complete filtered selection. Pagination and sorting
 preserve the selection. Changing the query, filters, or search invalidates the
