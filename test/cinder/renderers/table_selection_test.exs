@@ -263,6 +263,29 @@ defmodule Cinder.Renderers.TableSelectionTest do
       refute html =~ ~r/<input[^>]*disabled[^>]*phx-value-id="user-2"/
     end
 
+    test "keeps an already-selected infinite row toggleable when it becomes non-selectable" do
+      record = %{id: "user-2", name: "Bob", status: :inactive}
+
+      assigns =
+        predicate_assigns()
+        |> Map.merge(%{
+          pagination_mode: :infinite,
+          data: [],
+          selected_ids: MapSet.new(["user-2"]),
+          streams: %{
+            items: [
+              {"test-table-items-user-2",
+               %{record: record, id: "user-2", number: 2, selectable?: false}}
+            ]
+          }
+        })
+
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      assert html =~ ~r/<input[^>]*checked[^>]*phx-value-id="user-2"/
+      refute html =~ ~r/<input[^>]*disabled[^>]*phx-value-id="user-2"/
+    end
+
     test "header checkbox is checked when all selectable rows are selected" do
       assigns = Map.put(predicate_assigns(), :selected_ids, MapSet.new(["user-1"]))
 
