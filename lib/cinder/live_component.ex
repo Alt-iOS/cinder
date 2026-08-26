@@ -822,7 +822,7 @@ defmodule Cinder.LiveComponent do
   defp handle_result({:ok, page}, socket) do
     socket = maybe_store_sync_count(socket, page)
 
-    if socket.assigns.pagination_mode == :infinite do
+    if Map.get(socket.assigns, :pagination_mode, :offset) == :infinite do
       put_infinite_page(socket, page)
     else
       socket
@@ -881,17 +881,13 @@ defmodule Cinder.LiveComponent do
     end
   end
 
-  defp maybe_update_keyset_cursors(socket, page) do
-    if socket.assigns.pagination_mode in [:keyset, :infinite] do
-      results = page.results
-
-      socket
-      |> assign(:first_keyset, get_keyset_from_result(List.first(results)))
-      |> assign(:last_keyset, get_keyset_from_result(List.last(results)))
-    else
-      socket
-    end
+  defp maybe_update_keyset_cursors(socket, %Ash.Page.Keyset{} = page) do
+    socket
+    |> assign(:first_keyset, get_keyset_from_result(List.first(page.results)))
+    |> assign(:last_keyset, get_keyset_from_result(List.last(page.results)))
   end
+
+  defp maybe_update_keyset_cursors(socket, _page), do: socket
 
   defp get_keyset_from_result(nil), do: nil
 
