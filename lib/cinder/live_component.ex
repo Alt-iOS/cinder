@@ -1155,7 +1155,7 @@ defmodule Cinder.LiveComponent do
     socket = maybe_store_sync_count(socket, page)
 
     socket =
-      if socket.assigns.pagination_mode == :infinite do
+      if Map.get(socket.assigns, :pagination_mode, :offset) == :infinite do
         put_infinite_page(socket, page)
       else
         socket
@@ -1239,17 +1239,13 @@ defmodule Cinder.LiveComponent do
       (socket.assigns[:infinite_loaded_count] || 0) > 0
   end
 
-  defp maybe_update_keyset_cursors(socket, page) do
-    if socket.assigns.pagination_mode in [:keyset, :infinite] do
-      results = page.results
-
-      socket
-      |> assign(:first_keyset, get_keyset_from_result(List.first(results)))
-      |> assign(:last_keyset, get_keyset_from_result(List.last(results)))
-    else
-      socket
-    end
+  defp maybe_update_keyset_cursors(socket, %Ash.Page.Keyset{} = page) do
+    socket
+    |> assign(:first_keyset, get_keyset_from_result(List.first(page.results)))
+    |> assign(:last_keyset, get_keyset_from_result(List.last(page.results)))
   end
+
+  defp maybe_update_keyset_cursors(socket, _page), do: socket
 
   defp get_keyset_from_result(nil), do: nil
 
@@ -1912,7 +1908,7 @@ defmodule Cinder.LiveComponent do
   defp normalize_scope(value), do: value
 
   defp load_data_if_needed(socket, prev) do
-    first_load = socket.assigns[:__initial_load__] == true
+    first_load = socket.assigns[:page] == nil
     curr = data_state(socket.assigns)
     state_changed = curr != prev
     reload_requested = socket.assigns[:__reload_requested__] == true
