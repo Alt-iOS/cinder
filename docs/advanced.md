@@ -10,7 +10,7 @@ This guide covers URL state management, relationships, embedded resources, refre
 - [Collection Refresh](#collection-refresh)
 - [Loading, Empty & Error States](#loading-empty-error-states)
 - [Performance Optimization](#performance-optimization)
-- [Server-rendered Initial Data](#server-rendered-initial-data)
+- [Synchronous v Asynchronous Initial Data Loading](#synchronous-v-asynchronous-initial-data-loading)
 - [Query Access](#query-access)
 - [Selection & Bulk Actions](#selection--bulk-actions)
 
@@ -705,28 +705,42 @@ When `selectable` is enabled without a `click` handler, clicking rows/items togg
 </Cinder.collection>
 ```
 
-## Server-rendered initial data
+## Synchronous v Asynchronous Initial Data Loading
 
-Cinder loads collection data asynchronously by default. To include the initial
-rows in the server-rendered HTML, enable SSR for a collection:
+Cinder runs a collection's first query after the page renders, so the initial
+HTML contains the table but not yet its rows. Set `initial_load={:sync}` to run
+that query first instead, putting the first page of data in the server-rendered
+HTML — useful for pages that need to be crawlable, or readable without JS:
 
 ```heex
-<Cinder.collection resource={MyApp.User} ssr>
+<Cinder.collection resource={MyApp.User} initial_load={:sync}>
   <:col :let={user} field="name">{user.name}</:col>
 </Cinder.collection>
 ```
 
-You can enable it globally and override it for individual collections:
+Only the first load changes. Filtering, sorting, pagination, and refreshes stay
+asynchronous, and any state in the URL — filters, sort, page — is applied to
+that first render.
+
+The cost is latency. A synchronous load blocks both the initial HTTP response
+and the connected LiveView mount, so the query runs before either can complete
+and a slow one delays the page appearing and then delays it becoming
+interactive. That is the trade: rows in the first paint, in exchange for waiting
+on the query twice.
+
+You can change the default for every collection in the app, and override it per
+collection:
 
 ```elixir
-config :cinder, ssr: true
+config :cinder, default_initial_load: :sync
 ```
 
 ```heex
-<Cinder.collection resource={MyApp.AuditLog} ssr={false}>
+<Cinder.collection resource={MyApp.AuditLog} initial_load={:async}>
   ...
 </Cinder.collection>
 ```
 
-SSR only makes the initial load synchronous. Filtering, sorting, pagination,
-and refreshes continue to load asynchronously.
+Setting the global default applies the latency cost everywhere, including pages
+behind a login where nothing benefits from it, so it is usually better to opt in
+the specific collections that need it.

@@ -5,7 +5,7 @@ defmodule Cinder.LiveComponent do
   This component handles all data management logic:
   - State management (filters, sorting, pagination)
   - Event handling (filter_change, toggle_sort, goto_page, etc.)
-  - Server-rendered initial data and async subsequent loading
+  - Async data loading, with an optional synchronous first load
   - URL state synchronization
 
   The actual HTML rendering is delegated to a renderer module passed via
@@ -853,10 +853,9 @@ defmodule Cinder.LiveComponent do
     |> assign(:search_term, assigns[:search_term] || "")
     |> assign(:theme, assigns[:theme] || Cinder.Theme.default())
     |> assign(:query_opts, assigns[:query_opts] || [])
-    |> assign(:ssr, Map.get(assigns, :ssr, false))
+    |> assign(:initial_load, Map.get(assigns, :initial_load, :async))
     |> assign_new(:action, fn -> nil end)
     |> assign_new(:page, fn -> nil end)
-    |> assign_new(:__initial_load__, fn -> is_nil(assigns[:page]) end)
     |> assign(:user_has_interacted, Map.get(socket.assigns, :user_has_interacted, false))
     # Keyset pagination state
     |> assign(:pagination_mode, pagination_mode)
@@ -970,7 +969,7 @@ defmodule Cinder.LiveComponent do
   defp normalize_scope(value), do: value
 
   defp load_data_if_needed(socket, prev) do
-    first_load = socket.assigns[:__initial_load__] == true
+    first_load = socket.assigns[:page] == nil
     curr = data_state(socket.assigns)
     state_changed = curr != prev
     reload_requested = socket.assigns[:__reload_requested__] == true
@@ -984,7 +983,12 @@ defmodule Cinder.LiveComponent do
   end
 
   defp load_data(socket) do
-    initial_load? = socket.assigns[:__initial_load__] == true
+    # A `:sync` collection spends exactly one blocking query, on its first load,
+    # so the data is in the server-rendered HTML. Everything after that — including
+    # a retry, if that first query failed — goes back to the async path.
+    sync_initial_load? =
+      socket.assigns[:initial_load] == :sync and
+        socket.assigns[:__initial_sync_done__] != true
 
     %{
       query: resource,
@@ -1032,17 +1036,15 @@ defmodule Cinder.LiveComponent do
     ]
 
     socket
-    |> assign(:__initial_load__, false)
     |> assign(:loading, true)
     |> assign(:error, false)
     |> then(fn socket ->
       # Build the query once so we can both execute it and hand it to the
       # on_query_change callback (if one is configured). maybe_notify_query_change/2
       # decides whether to actually notify.
-      # With SSR enabled, the first query completes before rendering so both the
-      # disconnected HTTP response and connected LiveView mount contain data.
-      # Later interactions remain async so they do not block the LiveView process.
-      if (initial_load? and socket.assigns.ssr) or Application.get_env(:ash, :disable_async?) do
+      if sync_initial_load? or Application.get_env(:ash, :disable_async?) do
+        socket = assign(socket, :__initial_sync_done__, true)
+
         try do
           case Cinder.QueryBuilder.build_query(resource_var, options) do
             {:ok, prepared_query} ->
