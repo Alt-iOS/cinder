@@ -1043,7 +1043,7 @@ defmodule Cinder.LiveComponent do
 
   defp maybe_notify_query_change(socket, query) do
     if event_name = socket.assigns[:on_query_change] do
-      payload = %{query: query, count: page_count(socket.assigns[:page]), id: socket.assigns.id}
+      payload = %{query: query, count: socket.assigns[:total_count], id: socket.assigns.id}
       send(self(), {event_name, payload})
     end
 
@@ -1729,6 +1729,7 @@ defmodule Cinder.LiveComponent do
     |> assign_new(:total_count, fn -> nil end)
     |> assign_new(:count_query_state, fn -> nil end)
     |> assign_new(:count_attempt, fn -> nil end)
+    |> assign_new(:count_query, fn -> nil end)
     |> assign(:window_size, window_size)
     |> assign(:overscan, overscan)
     |> assign(:show_item_numbers, assigns[:show_item_numbers] || false)
@@ -2080,22 +2081,29 @@ defmodule Cinder.LiveComponent do
     if Map.get(socket.assigns, :count_query_state) == state do
       socket
     else
-      assign(socket, total_count: nil, count_query_state: state, count_attempt: nil)
+      assign(socket,
+        total_count: nil,
+        count_query_state: state,
+        count_attempt: nil,
+        count_query: nil
+      )
     end
   end
 
-  defp maybe_store_sync_count(%{assigns: %{count_mode: :sync}} = socket, page) do
-    assign(socket, :total_count, Map.get(page, :count))
+  defp maybe_store_sync_count(socket, page) do
+    if Map.get(socket.assigns, :count_mode, :sync) == :sync do
+      assign(socket, :total_count, page_count(page))
+    else
+      socket
+    end
   end
-
-  defp maybe_store_sync_count(socket, _page), do: socket
 
   defp maybe_start_async_count(%{assigns: %{count_mode: :async}} = socket, %Ash.Query{} = query) do
     if is_integer(socket.assigns.total_count) or socket.assigns.count_attempt do
       socket
     else
       attempt = make_ref()
-      socket = assign(socket, :count_attempt, attempt)
+      socket = assign(socket, count_attempt: attempt, count_query: query)
       options = count_query_options(socket)
 
       if Application.get_env(:ash, :disable_async?) do
@@ -2116,13 +2124,18 @@ defmodule Cinder.LiveComponent do
 
   defp apply_async_count_result(socket, attempt, {:ok, count})
        when socket.assigns.count_attempt == attempt do
-    assign(socket, total_count: count, count_attempt: nil)
+    query = socket.assigns.count_query
+
+    socket
+    |> assign(total_count: count, count_attempt: nil)
+    |> maybe_notify_query_change(query)
+    |> assign(:count_query, nil)
   end
 
   defp apply_async_count_result(socket, attempt, {:error, reason})
        when socket.assigns.count_attempt == attempt do
     Logger.warning("Cinder count query failed: #{inspect(reason)}")
-    assign(socket, :count_attempt, nil)
+    assign(socket, count_attempt: nil, count_query: nil)
   end
 
   defp apply_async_count_result(socket, _attempt, _result), do: socket
