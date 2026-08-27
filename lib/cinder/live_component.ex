@@ -739,7 +739,7 @@ defmodule Cinder.LiveComponent do
 
   defp maybe_notify_query_change(socket, query) do
     if event_name = socket.assigns[:on_query_change] do
-      payload = %{query: query, count: page_count(socket.assigns[:page]), id: socket.assigns.id}
+      payload = %{query: query, count: socket.assigns[:total_count], id: socket.assigns.id}
       send(self(), {event_name, payload})
     end
 
@@ -1626,7 +1626,7 @@ defmodule Cinder.LiveComponent do
   end
 
   defp maybe_store_sync_count(%{assigns: %{count_mode: :sync}} = socket, page) do
-    assign(socket, :total_count, Map.get(page, :count))
+    assign(socket, :total_count, page_count(page))
   end
 
   defp maybe_store_sync_count(socket, _page), do: socket
