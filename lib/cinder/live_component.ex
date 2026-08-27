@@ -623,7 +623,7 @@ defmodule Cinder.LiveComponent do
 
   defp maybe_notify_query_change(socket, query) do
     if event_name = socket.assigns[:on_query_change] do
-      payload = %{query: query, count: page_count(socket.assigns[:page]), id: socket.assigns.id}
+      payload = %{query: query, count: socket.assigns[:total_count], id: socket.assigns.id}
       send(self(), {event_name, payload})
     end
 
@@ -694,6 +694,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:error, false)
     |> assign(:data, page.results)
     |> assign(:page, page)
+    |> assign(:total_count, page_count(page))
     # Update keyset cursors for navigation (only relevant in keyset mode)
     |> maybe_update_keyset_cursors(page)
   end
