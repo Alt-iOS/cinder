@@ -85,8 +85,9 @@ defmodule Cinder.Renderers.List do
         <SelectAll.render
           data={@data}
           id_field={@id_field}
-          loading={@loading}
+          loading={@loading or Map.get(assigns, :selection_loading, false)}
           myself={@myself}
+          pending={Map.get(assigns, :selection_loading, false)}
           scope_ids={Map.get(assigns, :selection_scope_ids)}
           selectable={@selectable}
           selected_ids={@selected_ids}

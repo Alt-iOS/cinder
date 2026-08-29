@@ -10,6 +10,7 @@ defmodule Cinder.Renderers.SelectAll do
   attr :id_field, :atom, required: true
   attr :loading, :boolean, required: true
   attr :myself, :any, required: true
+  attr :pending, :boolean, default: false
   attr :scope_ids, :any, default: nil
   attr :selectable, :any, required: true
   attr :selected_ids, :any, required: true
@@ -19,7 +20,9 @@ defmodule Cinder.Renderers.SelectAll do
   def render(assigns) do
     page_ids = Selection.page_ids(assigns.data, assigns.id_field, assigns.selectable)
     selection_ids = assigns.scope_ids || page_ids
-    state = selection_state(assigns.selected_ids, selection_ids)
+
+    state =
+      if assigns.pending, do: :all, else: selection_state(assigns.selected_ids, selection_ids)
 
     assigns =
       assigns
