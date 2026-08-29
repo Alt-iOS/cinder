@@ -276,6 +276,8 @@ defmodule Cinder.Integration.LiveViewTest do
 
       conn
       |> visit(path)
+      |> assert_has("#infinite-albums-infinite-stream[phx-hook=CinderInfiniteStream]")
+      |> refute_has("#infinite-albums-stream-selection-state")
       |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 3)
       |> unwrap(fn view ->
         view
