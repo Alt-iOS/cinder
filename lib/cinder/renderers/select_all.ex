@@ -22,6 +22,7 @@ defmodule Cinder.Renderers.SelectAll do
       assigns.page_ids || Selection.page_ids(assigns.data, assigns.id_field, assigns.selectable)
 
     selection_ids = assigns.scope_ids || page_ids
+
     state = selection_state(assigns.selected_ids, selection_ids)
 
     assigns =

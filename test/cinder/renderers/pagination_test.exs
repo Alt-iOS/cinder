@@ -105,6 +105,33 @@ defmodule Cinder.Renderers.PaginationTest do
       refute html =~ "showing"
       refute html =~ " of "
     end
+
+    test "keeps the footer after navigating backward to the first page" do
+      page = %Ash.Page.Keyset{
+        results: [%{id: 1}, %{id: 2}],
+        count: nil,
+        limit: 10,
+        more?: false,
+        after: nil,
+        before: "page-2-first-cursor",
+        rerun: nil
+      }
+
+      assigns =
+        base_assigns("keyset-back-to-first")
+        |> Map.merge(%{
+          pagination_mode: :keyset,
+          current_page: 1,
+          total_count: nil,
+          page: page
+        })
+
+      html = render_component(&Pagination.render/1, assigns)
+
+      assert html =~ "Page 1"
+      assert html =~ "Next"
+      refute html =~ ~s(title="Previous page" disabled)
+    end
   end
 
   describe "infinite pagination" do
