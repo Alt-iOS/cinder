@@ -66,7 +66,7 @@ defmodule Cinder.Renderers.Pagination do
   defp show_pagination?(_page, :infinite, _assigns), do: true
 
   defp show_pagination?(page, :keyset, assigns) do
-    show_pagination?(page) or Map.get(assigns, :current_page, 1) > 1
+    show_pagination?(page) or keyset_cursor?(page) or Map.get(assigns, :current_page, 1) > 1
   end
 
   defp show_pagination?(%Ash.Page.Offset{offset: offset} = page, :offset, _assigns) do
@@ -74,6 +74,11 @@ defmodule Cinder.Renderers.Pagination do
   end
 
   defp show_pagination?(page, _pagination_mode, _assigns), do: show_pagination?(page)
+
+  defp keyset_cursor?(%Ash.Page.Keyset{after: after_cursor, before: before_cursor}),
+    do: not is_nil(after_cursor) or not is_nil(before_cursor)
+
+  defp keyset_cursor?(_page), do: false
 
   defp render_empty(assigns) do
     ~H"""

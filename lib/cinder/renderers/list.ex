@@ -51,15 +51,11 @@ defmodule Cinder.Renderers.List do
       class={[@theme.container_class, "relative"]}
       data-key="container_class"
       data-cinder-infinite-root={@pagination_mode == :infinite}
+      data-selected-ids={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_ids(@selected_ids, Map.get(assigns, :infinite_item_ids))}
+      data-selected-classes={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_classes(InfiniteStream.selected_classes(Map.get(@theme, :selected_item_class)))}
       id={if @pagination_mode == :infinite, do: "#{@id}-infinite-stream"}
+      phx-hook={if @pagination_mode == :infinite, do: "CinderInfiniteStream"}
     >
-      <InfiniteStream.selection_sync
-        :if={@pagination_mode == :infinite}
-        id={@id}
-        selected_ids={@selected_ids}
-        visible_ids={Map.get(assigns, :infinite_item_ids)}
-        selected_classes={InfiniteStream.selected_classes(Map.get(@theme, :selected_item_class))}
-      />
       <!-- Controls Area (filters + sort) -->
       <div :if={@show_filters || (@show_sort && SortControls.has_sortable_columns?(@columns))} class={[@theme.controls_class, "!flex !flex-col"]} data-key="controls_class">
         <!-- Filter Controls (including search) -->

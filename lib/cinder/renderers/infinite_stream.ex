@@ -30,37 +30,17 @@ defmodule Cinder.Renderers.InfiniteStream do
     """
   end
 
-  attr :id, :string, required: true
-  attr :selected_ids, :any, required: true
-  attr :visible_ids, :any, default: nil
-  attr :selected_classes, :list, default: []
-
-  def selection_sync(assigns) do
+  def encode_selected_ids(selected_ids, visible_ids \\ nil) do
     selected_ids =
-      case assigns.visible_ids do
-        %MapSet{} = visible_ids -> MapSet.intersection(assigns.selected_ids, visible_ids)
-        _ -> assigns.selected_ids
+      case visible_ids do
+        %MapSet{} -> MapSet.intersection(selected_ids, visible_ids)
+        _ -> selected_ids
       end
 
-    assigns =
-      assigns
-      |> assign(
-        :encoded_selected_ids,
-        Jason.encode!(selected_ids |> MapSet.to_list() |> Enum.sort())
-      )
-      |> assign(:encoded_selected_classes, Jason.encode!(assigns.selected_classes))
-
-    ~H"""
-    <span
-      id={"#{@id}-stream-selection-state"}
-      class="hidden"
-      data-cinder-stream-selection
-      data-selected-ids={@encoded_selected_ids}
-      data-selected-classes={@encoded_selected_classes}
-      phx-hook="CinderInfiniteStream"
-    />
-    """
+    Jason.encode!(selected_ids |> MapSet.to_list() |> Enum.sort())
   end
+
+  def encode_selected_classes(selected_classes), do: Jason.encode!(selected_classes)
 
   def selected_classes(class) when is_binary(class), do: String.split(class)
 

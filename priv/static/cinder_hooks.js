@@ -1,35 +1,96 @@
 const CinderInfiniteStream = {
   mounted() {
-    this.selectionObserver = new MutationObserver(() => this.syncSelection());
-    this.selectionObserver.observe(this.el, {
-      attributes: true,
-      attributeFilter: ["data-selected-ids", "data-selected-classes"],
-    });
+    this.appliedSelectionState = null;
     this.syncSelection();
+  },
+
+  beforeUpdate() {
+    const scroller = this.scrollContainer(this.el);
+    const viewport = this.viewportBounds(scroller);
+
+    this.viewportAnchors = Array.from(this.el.querySelectorAll("[data-item-id]"))
+      .map((item) => {
+        const bounds = item.getBoundingClientRect();
+
+        return {
+          id: item.dataset.itemId,
+          offset: bounds.top - viewport.top,
+          visible: bounds.bottom > viewport.top && bounds.top < viewport.bottom,
+        };
+      })
+      .filter(({ visible }) => visible);
+    this.viewportScroller = scroller;
   },
 
   updated() {
     this.syncSelection();
+    cancelAnimationFrame(this.viewportAnchorFrame);
+    this.viewportAnchorFrame = requestAnimationFrame(() => this.restoreViewportAnchor());
   },
 
   destroyed() {
-    this.selectionObserver?.disconnect();
+    cancelAnimationFrame(this.viewportAnchorFrame);
   },
 
   syncSelection() {
-    const state = this.el;
-    const root = state.closest("[data-cinder-infinite-root]");
-    if (!root) return;
+    const signature = `${this.el.dataset.selectedIds || "[]"}\n${this.el.dataset.selectedClasses || "[]"}`;
+    if (signature === this.appliedSelectionState) return;
 
-    const selected = new Set(JSON.parse(state.dataset.selectedIds || "[]"));
-    const selectedClasses = JSON.parse(state.dataset.selectedClasses || "[]");
+    this.appliedSelectionState = signature;
+    const selected = new Set(JSON.parse(this.el.dataset.selectedIds || "[]"));
+    const selectedClasses = JSON.parse(this.el.dataset.selectedClasses || "[]");
 
-    root.querySelectorAll("[data-item-id]").forEach((item) => {
+    this.el.querySelectorAll("[data-item-id]").forEach((item) => {
       const isSelected = selected.has(item.dataset.itemId);
       const checkbox = item.querySelector("[data-cinder-selection-checkbox]");
       if (checkbox) checkbox.checked = isSelected;
       selectedClasses.forEach((name) => item.classList.toggle(name, isSelected));
     });
+  },
+
+  restoreViewportAnchor() {
+    const anchors = this.viewportAnchors;
+    const scroller = this.viewportScroller;
+    this.viewportAnchors = null;
+    this.viewportScroller = null;
+
+    if (!anchors?.length || !scroller?.isConnected) return;
+
+    const itemsById = new Map(
+      Array.from(this.el.querySelectorAll("[data-item-id]"), (item) => [item.dataset.itemId, item]),
+    );
+    const anchor = anchors
+      .map((position) => ({ position, item: itemsById.get(position.id) }))
+      .find(({ item }) => item);
+
+    if (!anchor) return;
+
+    const viewport = this.viewportBounds(scroller);
+    const currentOffset = anchor.item.getBoundingClientRect().top - viewport.top;
+    const adjustment = currentOffset - anchor.position.offset;
+
+    if (Math.abs(adjustment) > 0.5) scroller.scrollTop += adjustment;
+  },
+
+  scrollContainer(stream) {
+    for (let element = stream; element; element = element.parentElement) {
+      const { overflowY } = window.getComputedStyle(element);
+
+      if (/(auto|scroll|overlay)/.test(overflowY) && element.scrollHeight > element.clientHeight) {
+        return element;
+      }
+    }
+
+    return document.scrollingElement;
+  },
+
+  viewportBounds(scroller) {
+    if (scroller === document.scrollingElement) {
+      return { top: 0, bottom: window.innerHeight };
+    }
+
+    const bounds = scroller.getBoundingClientRect();
+    return { top: bounds.top, bottom: bounds.bottom };
   },
 };
 
