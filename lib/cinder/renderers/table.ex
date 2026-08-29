@@ -93,6 +93,7 @@ defmodule Cinder.Renderers.Table do
                   id_field={@id_field}
                   loading={@loading or Map.get(assigns, :selection_loading, false)}
                   myself={@myself}
+                  pending={Map.get(assigns, :selection_loading, false)}
                   scope_ids={Map.get(assigns, :selection_scope_ids)}
                   page_ids={if @pagination_mode == :infinite, do: @infinite_selectable_ids}
                   selectable={@selectable}
