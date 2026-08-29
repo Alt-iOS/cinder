@@ -1325,8 +1325,17 @@ defmodule Cinder.LiveComponent do
     |> update_infinite_boundaries(page, direction, window_pruned?)
     |> assign(:infinite_append?, false)
     |> assign(:infinite_direction, :append)
+    |> maybe_notify_infinite_url_change()
     |> maybe_schedule_infinite_prefetch()
   end
+
+  defp maybe_notify_infinite_url_change(%{assigns: %{infinite_sync_url?: true}} = socket) do
+    socket
+    |> notify_state_change()
+    |> assign(:infinite_sync_url?, false)
+  end
+
+  defp maybe_notify_infinite_url_change(socket), do: socket
 
   defp strip_page_results(%Ash.Page.Keyset{} = page), do: %{page | results: []}
   defp strip_page_results(%Ash.Page.Offset{} = page), do: %{page | results: []}
@@ -1461,10 +1470,10 @@ defmodule Cinder.LiveComponent do
   defp maybe_start_infinite_prefetch(socket) do
     socket
     |> assign(:infinite_prefetch_scheduled?, false)
-    |> maybe_load_infinite(:append)
+    |> maybe_load_infinite(:append, false)
   end
 
-  defp maybe_load_infinite(socket, direction) do
+  defp maybe_load_infinite(socket, direction, sync_url? \\ true) do
     can_load? =
       socket.assigns.pagination_mode == :infinite and not socket.assigns.loading and
         not socket.assigns.error
@@ -1480,6 +1489,7 @@ defmodule Cinder.LiveComponent do
           |> assign(:before_keyset, nil)
           |> assign(:infinite_append?, true)
           |> assign(:infinite_direction, :append)
+          |> assign(:infinite_sync_url?, sync_url?)
           |> load_data()
         else
           socket
@@ -1493,6 +1503,7 @@ defmodule Cinder.LiveComponent do
           |> assign(:after_keyset, nil)
           |> assign(:infinite_append?, true)
           |> assign(:infinite_direction, :prepend)
+          |> assign(:infinite_sync_url?, sync_url?)
           |> load_data()
         else
           socket
@@ -1590,9 +1601,9 @@ defmodule Cinder.LiveComponent do
       filter_field_names: filter_field_names
     }
 
-    # For keyset pagination, include after/before cursors for URL persistence
+    # Infinite pagination resumes from the same keyset cursor as keyset pagination.
     state =
-      if pagination_mode == :keyset do
+      if pagination_mode in [:keyset, :infinite] do
         state
         |> maybe_put_cursor(:after, socket.assigns.after_keyset)
         |> maybe_put_cursor(:before, socket.assigns.before_keyset)
@@ -1656,9 +1667,9 @@ defmodule Cinder.LiveComponent do
           socket
         end
 
-      # Handle keyset cursors from URL (after/before params)
+      # Keyset and infinite pagination share cursor recovery.
       updated_socket =
-        if socket.assigns.pagination_mode == :keyset do
+        if socket.assigns.pagination_mode in [:keyset, :infinite] do
           updated_socket
           |> maybe_assign_cursor(:after_keyset, decoded_state.after)
           |> maybe_assign_cursor(:before_keyset, decoded_state.before)
@@ -1748,6 +1759,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_has_previous, assigns[:infinite_has_previous] || false)
     |> assign(:infinite_has_next, assigns[:infinite_has_next] || false)
     |> assign(:infinite_prefetch_scheduled?, assigns[:infinite_prefetch_scheduled?] || false)
+    |> assign(:infinite_sync_url?, assigns[:infinite_sync_url?] || false)
     |> assign_new(:infinite_stream_configured?, fn -> false end)
     # Selection state
     |> assign(:selectable, assigns[:selectable] || false)

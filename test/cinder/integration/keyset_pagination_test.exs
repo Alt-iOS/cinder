@@ -643,12 +643,72 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert loading_socket.assigns.after_keyset == "last_cursor"
       assert loading_socket.assigns.current_page == 2
       assert loading_socket.assigns.infinite_append?
+      assert loading_socket.assigns.infinite_sync_url?
       assert loading_socket.assigns.loading
 
       {:noreply, unchanged_socket} =
         LiveComponent.handle_event("load_more", %{}, loading_socket)
 
       assert unchanged_socket.assigns.current_page == 2
+    end
+
+    test "infinite mode restores a keyset cursor from URL state" do
+      assigns =
+        build_keyset_test_assigns()
+        |> Map.merge(%{
+          pagination_mode: :infinite,
+          url_raw_params: %{"after" => "resume-cursor"}
+        })
+
+      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
+      {:ok, socket} = LiveComponent.update(assigns, socket)
+
+      assert socket.assigns.after_keyset == "resume-cursor"
+      assert socket.assigns.before_keyset == nil
+    end
+
+    test "successful user-triggered infinite loads publish their resume cursor" do
+      assigns =
+        build_keyset_test_assigns()
+        |> Map.merge(%{pagination_mode: :infinite, on_state_change: :table_changed})
+
+      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
+      {:ok, socket} = LiveComponent.update(assigns, socket)
+
+      socket =
+        socket
+        |> Phoenix.LiveView.cancel_async(:load_data)
+        |> Phoenix.Component.assign(:loading, false)
+        |> Phoenix.Component.assign(:error, false)
+        |> Phoenix.Component.assign(:infinite_has_next, true)
+        |> Phoenix.Component.assign(:infinite_pages, [
+          %{
+            page: 1,
+            first_keyset: "first_cursor",
+            last_keyset: "resume_cursor",
+            ids: ["1"],
+            selectable_ids: ["1"],
+            items: [
+              %{id: "1", keyset: "resume_cursor", number: 1, selectable?: true}
+            ]
+          }
+        ])
+
+      {:noreply, loading_socket} = LiveComponent.handle_event("load_more", %{}, socket)
+
+      page = %Ash.Page.Offset{
+        results: [%{id: "2"}],
+        count: nil,
+        offset: 0,
+        limit: 1,
+        more?: true
+      }
+
+      {:noreply, settled_socket} =
+        LiveComponent.handle_async(:load_data, {:ok, {{:ok, page}, nil}}, loading_socket)
+
+      assert_receive {:table_changed, "keyset-test-table", %{after: "resume_cursor"}}
+      refute settled_socket.assigns.infinite_sync_url?
     end
 
     test "load_more is ignored at the end of infinite results" do
