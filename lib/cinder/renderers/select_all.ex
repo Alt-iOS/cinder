@@ -9,6 +9,7 @@ defmodule Cinder.Renderers.SelectAll do
   attr :data, :any, required: true
   attr :id_field, :atom, required: true
   attr :loading, :boolean, required: true
+  attr :label, :string, default: nil
   attr :myself, :any, required: true
   attr :pending, :boolean, default: false
   attr :scope_ids, :any, default: nil
@@ -27,7 +28,7 @@ defmodule Cinder.Renderers.SelectAll do
     assigns =
       assigns
       |> assign(:disabled, assigns.loading or MapSet.size(selection_ids) == 0)
-      |> assign(:label, dgettext("cinder", "Select all filtered items"))
+      |> assign(:label, assigns.label || dgettext("cinder", "Select all filtered items"))
       |> assign(:state, state)
 
     ~H"""

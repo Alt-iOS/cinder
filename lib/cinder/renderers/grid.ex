@@ -71,6 +71,7 @@ defmodule Cinder.Renderers.Grid do
           theme={@theme}
           myself={@myself}
           loading={@loading or Map.get(assigns, :selection_loading, false)}
+          label={Map.get(assigns, :select_all_label)}
         />
       </div>
 

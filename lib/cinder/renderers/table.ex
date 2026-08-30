@@ -61,6 +61,7 @@ defmodule Cinder.Renderers.Table do
                   data={@data}
                   id_field={@id_field}
                   loading={@loading or Map.get(assigns, :selection_loading, false)}
+                  label={Map.get(assigns, :select_all_label)}
                   myself={@myself}
                   pending={Map.get(assigns, :selection_loading, false)}
                   scope_ids={Map.get(assigns, :selection_scope_ids)}

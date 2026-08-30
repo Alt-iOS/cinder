@@ -206,6 +206,11 @@ defmodule Cinder.Collection do
     doc: "Label for sort button group (defaults to translated \"Sort by:\")"
   )
 
+  attr(:select_all_label, :string,
+    default: nil,
+    doc: "Selection toggle label (defaults to translated \"Select all filtered items\")"
+  )
+
   attr(:search, :any,
     default: nil,
     doc: "Search configuration. Auto-enables when searchable columns exist."
@@ -383,6 +388,10 @@ defmodule Cinder.Collection do
       |> assign(:loading_message, assigns[:loading_message] || dgettext("cinder", "Loading..."))
       |> assign(:filters_label, assigns[:filters_label] || dgettext("cinder", "Filters"))
       |> assign(:sort_label, assigns[:sort_label] || dgettext("cinder", "Sort by:"))
+      |> assign(
+        :select_all_label,
+        assigns[:select_all_label] || dgettext("cinder", "Select all filtered items")
+      )
       |> assign(:empty_message, assigns.empty_message || dgettext("cinder", "No results found"))
       |> assign(
         :error_message,
@@ -500,6 +509,7 @@ defmodule Cinder.Collection do
         loading_message={@loading_message}
         filters_label={@filters_label}
         sort_label={@sort_label}
+        select_all_label={@select_all_label}
         empty_message={@empty_message}
         error_message={@error_message}
         controls_slot={@controls_slot}
