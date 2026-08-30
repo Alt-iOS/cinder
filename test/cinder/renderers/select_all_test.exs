@@ -10,6 +10,7 @@ defmodule Cinder.Renderers.SelectAllTest do
       render_component(&SelectAll.render/1,
         data: [%{id: "product-1"}],
         id_field: :id,
+        label: "Choose every matching row",
         loading: true,
         myself: nil,
         pending: true,
@@ -26,5 +27,7 @@ defmodule Cinder.Renderers.SelectAllTest do
     assert html =~ ~s(aria-checked="true")
     assert html =~ ~s(data-selection-state="all")
     assert html =~ ~s(disabled)
+    assert html =~ "Choose every matching row"
+    assert html =~ ~s(aria-label="Choose every matching row")
   end
 end

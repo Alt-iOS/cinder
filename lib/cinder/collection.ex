@@ -199,6 +199,19 @@ defmodule Cinder.Collection do
     doc: "Number of additional page_size batches prefetched for infinite pagination."
   )
 
+  attr(:infinite_load, :atom,
+    default: :automatic,
+    values: [:automatic, :manual],
+    doc:
+      "How infinite pagination loads additional batches. :automatic attaches the viewport " <>
+        "sentinel hook; :manual leaves the Load More button in control."
+  )
+
+  attr(:load_more_label, :string,
+    default: nil,
+    doc: "Infinite pagination button label (defaults to translated \"Load more\")"
+  )
+
   attr(:show_item_numbers, :boolean,
     default: false,
     doc:
@@ -228,6 +241,11 @@ defmodule Cinder.Collection do
   attr(:sort_label, :string,
     default: nil,
     doc: "Label for sort button group (defaults to translated \"Sort by:\")"
+  )
+
+  attr(:select_all_label, :string,
+    default: nil,
+    doc: "Selection toggle label (defaults to translated \"Select all filtered items\")"
   )
 
   attr(:search, :any,
@@ -423,6 +441,11 @@ defmodule Cinder.Collection do
       |> assign(:loading_message, assigns[:loading_message] || dgettext("cinder", "Loading..."))
       |> assign(:filters_label, assigns[:filters_label] || dgettext("cinder", "Filters"))
       |> assign(:sort_label, assigns[:sort_label] || dgettext("cinder", "Sort by:"))
+      |> assign(:load_more_label, assigns[:load_more_label] || dgettext("cinder", "Load more"))
+      |> assign(
+        :select_all_label,
+        assigns[:select_all_label] || dgettext("cinder", "Select all filtered items")
+      )
       |> assign(:empty_message, assigns.empty_message || dgettext("cinder", "No results found"))
       |> assign(
         :error_message,
@@ -549,6 +572,8 @@ defmodule Cinder.Collection do
         loading_message={@loading_message}
         filters_label={@filters_label}
         sort_label={@sort_label}
+        load_more_label={@load_more_label}
+        select_all_label={@select_all_label}
         empty_message={@empty_message}
         error_message={@error_message}
         controls_slot={@controls_slot}
@@ -571,6 +596,7 @@ defmodule Cinder.Collection do
         count_mode={@count_mode}
         window_size={@window_size}
         overscan={@overscan}
+        infinite_load={@infinite_load}
         show_item_numbers={@show_item_numbers}
         id_field={@id_field}
         selectable={@selectable}
