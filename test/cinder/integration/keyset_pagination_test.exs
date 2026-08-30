@@ -385,7 +385,7 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert decoded.before == nil
     end
 
-    test "prefers cursor over page number for keyset mode" do
+    test "preserves the page ordinal alongside the keyset cursor" do
       state = %{
         filters: %{},
         sort_by: [],
@@ -398,9 +398,16 @@ defmodule Cinder.Integration.KeysetPaginationTest do
 
       encoded = UrlManager.encode_state(state)
 
-      # Should have cursor, not page
       assert encoded[:after] == "some_cursor"
-      refute Map.has_key?(encoded, :page)
+      assert encoded[:page] == "5"
+
+      decoded =
+        encoded
+        |> Map.new(fn {key, value} -> {to_string(key), value} end)
+        |> UrlManager.decode_state([])
+
+      assert decoded.after == "some_cursor"
+      assert decoded.current_page == 5
     end
 
     test "falls back to page number when no cursor present" do
