@@ -12,6 +12,8 @@ defmodule Cinder.Integration.KeysetPaginationTest do
 
   use ExUnit.Case, async: true
 
+  import Phoenix.LiveViewTest, only: [render_component: 2]
+
   alias Cinder.QueryBuilder
   alias Cinder.UrlManager
 
@@ -643,7 +645,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert loading_socket.assigns.after_keyset == "last_cursor"
       assert loading_socket.assigns.current_page == 2
       assert loading_socket.assigns.infinite_append?
-      assert loading_socket.assigns.infinite_sync_url?
       assert loading_socket.assigns.loading
 
       {:noreply, unchanged_socket} =
@@ -667,7 +668,7 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert socket.assigns.before_keyset == nil
     end
 
-    test "successful user-triggered infinite loads publish their resume cursor" do
+    test "every infinite load publishes its resume cursor when it starts" do
       assigns =
         build_keyset_test_assigns()
         |> Map.merge(%{pagination_mode: :infinite, on_state_change: :table_changed})
@@ -695,20 +696,71 @@ defmodule Cinder.Integration.KeysetPaginationTest do
         ])
 
       {:noreply, loading_socket} = LiveComponent.handle_event("load_more", %{}, socket)
+      assert_receive {:table_changed, "keyset-test-table", %{after: "resume_cursor"}}
+      assert loading_socket.assigns.loading
+    end
 
-      page = %Ash.Page.Offset{
-        results: [%{id: "2"}],
+    test "manual infinite pagination renders a working button without the viewport hook" do
+      page = %Ash.Page.Keyset{
+        results: [],
         count: nil,
-        offset: 0,
-        limit: 1,
-        more?: true
+        limit: 25,
+        more?: true,
+        after: nil,
+        before: nil,
+        rerun: nil
       }
 
-      {:noreply, settled_socket} =
-        LiveComponent.handle_async(:load_data, {:ok, {{:ok, page}, nil}}, loading_socket)
+      html =
+        render_component(&Cinder.Renderers.Pagination.render/1, %{
+          id: "manual-infinite",
+          page: page,
+          page_size_config: Cinder.PageSize.parse(25),
+          theme: Cinder.Theme.default(),
+          myself: %Phoenix.LiveComponent.CID{cid: 1},
+          show_pagination: true,
+          pagination_mode: :infinite,
+          infinite_load: :manual,
+          load_more_label: "Fetch another batch",
+          has_next: true,
+          loading: false,
+          error: false
+        })
 
-      assert_receive {:table_changed, "keyset-test-table", %{after: "resume_cursor"}}
-      refute settled_socket.assigns.infinite_sync_url?
+      assert html =~ ~s(phx-click="load_more")
+      assert html =~ "Fetch another batch"
+      refute html =~ ~s(phx-hook="CinderInfiniteSentinel")
+    end
+
+    test "automatic infinite pagination attaches the viewport hook" do
+      page = %Ash.Page.Keyset{
+        results: [],
+        count: nil,
+        limit: 25,
+        more?: true,
+        after: nil,
+        before: nil,
+        rerun: nil
+      }
+
+      html =
+        render_component(&Cinder.Renderers.Pagination.render/1, %{
+          id: "automatic-infinite",
+          page: page,
+          page_size_config: Cinder.PageSize.parse(25),
+          theme: Cinder.Theme.default(),
+          myself: %Phoenix.LiveComponent.CID{cid: 1},
+          show_pagination: true,
+          pagination_mode: :infinite,
+          infinite_load: :automatic,
+          load_more_label: "Load more",
+          has_next: true,
+          loading: false,
+          error: false
+        })
+
+      assert html =~ ~s(phx-click="load_more")
+      assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
     end
 
     test "load_more is ignored at the end of infinite results" do

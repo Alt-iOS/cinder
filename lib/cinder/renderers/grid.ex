@@ -106,6 +106,7 @@ defmodule Cinder.Renderers.Grid do
           data={@data}
           id_field={@id_field}
           loading={@loading or Map.get(assigns, :selection_loading, false)}
+          label={Map.get(assigns, :select_all_label)}
           myself={@myself}
           pending={Map.get(assigns, :selection_loading, false)}
           scope_ids={Map.get(assigns, :selection_scope_ids)}
@@ -271,6 +272,8 @@ defmodule Cinder.Renderers.Grid do
         has_next={@infinite_has_next}
         loading={@loading}
         error={@error}
+        infinite_load={Map.get(assigns, :infinite_load, :automatic)}
+        load_more_label={Map.get(assigns, :load_more_label)}
         id={@id}
       />
     </div>
