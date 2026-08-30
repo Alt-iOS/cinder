@@ -199,6 +199,19 @@ defmodule Cinder.Collection do
     doc: "Number of additional page_size batches prefetched for infinite pagination."
   )
 
+  attr(:infinite_load, :atom,
+    default: :automatic,
+    values: [:automatic, :manual],
+    doc:
+      "How infinite pagination loads additional batches. :automatic attaches the viewport " <>
+        "sentinel hook; :manual leaves the Load More button in control."
+  )
+
+  attr(:load_more_label, :string,
+    default: nil,
+    doc: "Infinite pagination button label (defaults to translated \"Load more\")"
+  )
+
   attr(:show_item_numbers, :boolean,
     default: false,
     doc:
@@ -407,6 +420,7 @@ defmodule Cinder.Collection do
       |> assign(:loading_message, assigns[:loading_message] || dgettext("cinder", "Loading..."))
       |> assign(:filters_label, assigns[:filters_label] || dgettext("cinder", "Filters"))
       |> assign(:sort_label, assigns[:sort_label] || dgettext("cinder", "Sort by:"))
+      |> assign(:load_more_label, assigns[:load_more_label] || dgettext("cinder", "Load more"))
       |> assign(:empty_message, assigns.empty_message || dgettext("cinder", "No results found"))
       |> assign(
         :error_message,
@@ -548,6 +562,8 @@ defmodule Cinder.Collection do
         count_mode={@count_mode}
         window_size={@window_size}
         overscan={@overscan}
+        infinite_load={@infinite_load}
+        load_more_label={@load_more_label}
         show_item_numbers={@show_item_numbers}
         id_field={@id_field}
         selectable={@selectable}

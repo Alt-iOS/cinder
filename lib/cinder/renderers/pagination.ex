@@ -299,6 +299,11 @@ defmodule Cinder.Renderers.Pagination do
       |> assign(:error, Map.get(assigns, :error, false))
       |> assign(:has_next, has_next)
       |> assign(:loading, Map.get(assigns, :loading, false))
+      |> assign(:infinite_load, Map.get(assigns, :infinite_load, :automatic))
+      |> assign(
+        :load_more_label,
+        Map.get(assigns, :load_more_label) || dgettext("cinder", "Load more")
+      )
       |> assign(:total_count, total_count)
 
     ~H"""
@@ -344,8 +349,8 @@ defmodule Cinder.Renderers.Pagination do
           class={@theme.pagination_info_class}
           data-key="pagination_info_class"
           data-pagination-state="ready"
-          data-infinite-prefetch-distance="viewport"
-          phx-hook="CinderInfiniteSentinel"
+          data-infinite-prefetch-distance={if @infinite_load == :automatic, do: "viewport"}
+          phx-hook={if @infinite_load == :automatic, do: "CinderInfiniteSentinel"}
           phx-target={@myself}
         >
           <button
@@ -354,7 +359,7 @@ defmodule Cinder.Renderers.Pagination do
             phx-click="load_more"
             phx-target={@myself}
           >
-            {dgettext("cinder", "Load more")}
+            {@load_more_label}
           </button>
         </div>
 

@@ -248,6 +248,8 @@ defmodule Cinder.Renderers.List do
         has_next={@infinite_has_next}
         loading={@loading}
         error={@error}
+        infinite_load={Map.get(assigns, :infinite_load, :automatic)}
+        load_more_label={Map.get(assigns, :load_more_label)}
         id={@id}
       />
     </div>
