@@ -39,6 +39,7 @@ defmodule Cinder.Renderers.Grid do
       |> assign_infinite_defaults()
       |> assign_new(:show_item_numbers, fn -> false end)
       |> assign_new(:current_page, fn -> 1 end)
+      |> assign(:selection_locked, Map.get(assigns, :selection_loading, false))
       |> assign(
         :show_loading_state,
         assigns.loading and not Map.get(assigns, :silent_refresh, false)
@@ -135,11 +136,11 @@ defmodule Cinder.Renderers.Grid do
           <div
             :for={{dom_id, payload} <- @stream_items} :if={@pagination_mode == :infinite}
             id={dom_id}
-            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), payload.record, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
+            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), payload.record, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
             data-item-id={payload.id}
             data-item-number={payload.number}
             data-key={@grid_item_data_key}
-            phx-click={selection_click_action(@item_click, Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), payload.record, Map.get(assigns, :id_field, :id), @myself)}
+            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), payload.record, Map.get(assigns, :id_field, :id), @myself)}
           >
             <span :if={@show_item_numbers} class={@theme.pagination_count_class} data-item-number>
               {payload.number}.
@@ -151,7 +152,7 @@ defmodule Cinder.Renderers.Grid do
             >
               <input
                 type="checkbox"
-                disabled={not payload.selectable?}
+                disabled={@selection_locked or not payload.selectable?}
                 checked={Selection.item_selected?(@selected_ids, payload.record, @id_field)}
                 phx-click="toggle_select"
                 phx-value-id={payload.id}
@@ -165,11 +166,11 @@ defmodule Cinder.Renderers.Grid do
           </div>
           <div
             :for={{item, index} <- Enum.with_index(@data)} :if={@pagination_mode != :infinite and not @error}
-            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
+            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
             data-item-id={to_string(Map.get(item, @id_field))}
             data-item-number={item_number(index, @pagination_mode, @current_page, @page)}
             data-key={@grid_item_data_key}
-            phx-click={selection_click_action(@item_click, Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), @myself)}
+            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), @myself)}
           >
             <span
               :if={@show_item_numbers}
@@ -185,7 +186,7 @@ defmodule Cinder.Renderers.Grid do
             >
               <input
                 type="checkbox"
-                disabled={not Selection.item_toggleable?(Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id))}
+                disabled={@selection_locked or not Selection.item_toggleable?(Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id))}
                 checked={Selection.item_selected?(Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id))}
                 phx-click="toggle_select"
                 phx-value-id={to_string(Map.get(item, Map.get(assigns, :id_field, :id)))}

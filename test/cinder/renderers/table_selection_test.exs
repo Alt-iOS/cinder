@@ -233,6 +233,21 @@ defmodule Cinder.Renderers.TableSelectionTest do
       assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select_all"/
     end
 
+    test "disables row selection while query-wide select all is loading" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          selectable: true,
+          selection_loading: true,
+          data: [%{id: "user-1", name: "Alice"}]
+        })
+
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select"/
+      refute html =~ ~s(phx-click="[[\"push\",{\"event\":\"toggle_select\")
+    end
+
     test "row checkbox reflects selection state" do
       assigns =
         base_assigns()

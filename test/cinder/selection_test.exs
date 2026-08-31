@@ -25,6 +25,22 @@ defmodule Cinder.SelectionTest do
   end
 
   describe "toggle_select event" do
+    test "ignores row toggles while query-wide select all is loading" do
+      socket =
+        make_socket(%{
+          id: "test-table",
+          selectable: true,
+          selection_loading: true,
+          selected_ids: MapSet.new(),
+          data: [%{id: "user-1"}]
+        })
+
+      {:noreply, updated_socket} =
+        LiveComponent.handle_event("toggle_select", %{"id" => "user-1"}, socket)
+
+      assert MapSet.size(updated_socket.assigns.selected_ids) == 0
+    end
+
     test "adds item to selection when not selected" do
       socket =
         make_socket(%{
