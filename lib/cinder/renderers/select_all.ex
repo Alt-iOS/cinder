@@ -14,6 +14,7 @@ defmodule Cinder.Renderers.SelectAll do
   attr :myself, :any, required: true
   attr :pending, :boolean, default: false
   attr :scope_ids, :any, default: nil
+  attr :selection_mode, :atom, default: :explicit
   attr :selectable, :any, required: true
   attr :selected_ids, :any, required: true
   attr :theme, :map, required: true
@@ -23,8 +24,7 @@ defmodule Cinder.Renderers.SelectAll do
     page_ids = Selection.page_ids(assigns.data, assigns.id_field, assigns.selectable)
     selection_ids = if assigns.mode == :query, do: assigns.scope_ids || page_ids, else: page_ids
 
-    state =
-      if assigns.pending, do: :all, else: selection_state(assigns.selected_ids, selection_ids)
+    state = selection_state(assigns, selection_ids)
 
     assigns =
       assigns
@@ -69,7 +69,16 @@ defmodule Cinder.Renderers.SelectAll do
   defp default_label(:page), do: dgettext("cinder", "Select all visible items")
   defp default_label(_mode), do: dgettext("cinder", "Select all filtered items")
 
-  defp selection_state(selected_ids, selection_ids) do
+  defp selection_state(%{mode: :query, selection_mode: :all_matching} = assigns, _ids) do
+    if MapSet.size(assigns.selected_ids) == 0, do: :all, else: :some
+  end
+
+  defp selection_state(%{pending: true}, _selection_ids), do: :all
+
+  defp selection_state(assigns, selection_ids),
+    do: explicit_selection_state(assigns.selected_ids, selection_ids)
+
+  defp explicit_selection_state(selected_ids, selection_ids) do
     cond do
       MapSet.size(selection_ids) == 0 -> :none
       MapSet.subset?(selection_ids, selected_ids) -> :all

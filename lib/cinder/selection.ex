@@ -38,7 +38,15 @@ defmodule Cinder.Selection do
   @doc """
   Returns whether the given `item` is currently selected.
   """
-  def item_selected?(selected_ids, item, id_field) do
+  def item_selected?(selected_ids, item, id_field),
+    do: item_selected?(:explicit, selected_ids, item, id_field)
+
+  @doc false
+  def item_selected?(:all_matching, selected_ids, item, id_field) do
+    not MapSet.member?(selected_ids, to_string(Map.get(item, id_field)))
+  end
+
+  def item_selected?(_mode, selected_ids, item, id_field) do
     MapSet.member?(selected_ids, to_string(Map.get(item, id_field)))
   end
 
@@ -50,6 +58,12 @@ defmodule Cinder.Selection do
   """
   def item_toggleable?(selectable, selected_ids, item, id_field) do
     item_selectable?(selectable, item) or item_selected?(selected_ids, item, id_field)
+  end
+
+  @doc false
+  def item_toggleable?(selectable, mode, selected_ids, item, id_field) do
+    item_selectable?(selectable, item) or
+      item_selected?(mode, selected_ids, item, id_field)
   end
 
   @doc """
@@ -69,6 +83,17 @@ defmodule Cinder.Selection do
   def page_ids(_data, _id_field, _selectable), do: MapSet.new()
 
   @doc false
+  def rendered_selected_ids(:all_matching, selected_ids, data, id_field) do
+    data
+    |> Enum.map(&to_string(Map.get(&1, id_field)))
+    |> MapSet.new()
+    |> MapSet.difference(selected_ids)
+  end
+
+  def rendered_selected_ids(_mode, selected_ids, _data, _id_field),
+    do: selected_ids
+
+  @doc false
   def filtered_ids(resource_or_query, options, id_field, selectable) do
     with {:ok, query} <- Cinder.QueryBuilder.build_query(resource_or_query, options) do
       query
@@ -80,6 +105,14 @@ defmodule Cinder.Selection do
           selected_ids
         end
       end)
+    end
+  end
+
+  @doc false
+  def all_matching_query(resource_or_query, options) do
+    with {:ok, query} <- Cinder.QueryBuilder.build_query(resource_or_query, options) do
+      {:ok,
+       Ash.Query.unset(query, [:load, :select, :sort, :distinct_sort, :limit, :offset, :page])}
     end
   end
 

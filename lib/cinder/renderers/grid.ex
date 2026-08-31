@@ -37,6 +37,15 @@ defmodule Cinder.Renderers.Grid do
       assigns
       |> assign(:has_item_slot, has_item_slot)
       |> assign(:selection_locked, Map.get(assigns, :selection_loading, false))
+      |> assign(
+        :render_selected_ids,
+        Selection.rendered_selected_ids(
+          Map.get(assigns, :selection_mode, :explicit),
+          assigns.selected_ids,
+          assigns.data,
+          assigns.id_field
+        )
+      )
       |> assign(:grid_container_class, container_class)
       |> assign(:grid_item_class, item_class)
       |> assign(:grid_item_data_key, item_data_key)
@@ -80,6 +89,8 @@ defmodule Cinder.Renderers.Grid do
       <BulkActions.render
         selectable={@selectable}
         selected_ids={@selected_ids}
+        selection_mode={Map.get(assigns, :selection_mode, :explicit)}
+        total_count={Map.get(assigns, :total_count) || (@page && Map.get(@page, :count))}
         bulk_action_slots={@bulk_action_slots}
         theme={@theme}
         myself={@myself}
@@ -97,6 +108,7 @@ defmodule Cinder.Renderers.Grid do
           scope_ids={if Map.get(assigns, :select_all, :query) == :query, do: Map.get(assigns, :selection_scope_ids)}
           selectable={@selectable}
           selected_ids={@selected_ids}
+          selection_mode={Map.get(assigns, :selection_mode, :explicit)}
           theme={@theme}
         />
       </div>
@@ -106,9 +118,9 @@ defmodule Cinder.Renderers.Grid do
         <%= if @has_item_slot do %>
           <div
             :for={item <- @data} :if={not @error}
-            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
+            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), @render_selected_ids, item, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
             data-key={@grid_item_data_key}
-            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), @myself)}
+            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), @render_selected_ids, item, Map.get(assigns, :id_field, :id), @myself)}
           >
             <div
               :if={Selection.enabled?(Map.get(assigns, :selectable, false))}
@@ -117,8 +129,8 @@ defmodule Cinder.Renderers.Grid do
             >
               <input
                 type="checkbox"
-                disabled={@selection_locked or not Selection.item_toggleable?(Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id))}
-                checked={Selection.item_selected?(Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id))}
+                disabled={@selection_locked or not Selection.item_toggleable?(Map.get(assigns, :selectable, false), @render_selected_ids, item, Map.get(assigns, :id_field, :id))}
+                checked={Selection.item_selected?(@render_selected_ids, item, Map.get(assigns, :id_field, :id))}
                 phx-click="toggle_select"
                 phx-value-id={to_string(Map.get(item, Map.get(assigns, :id_field, :id)))}
                 phx-target={@myself}

@@ -14,6 +14,9 @@ defmodule Cinder.SelectionTest do
       id_field: :id,
       selectable: false,
       selected_ids: MapSet.new(),
+      selection_mode: :explicit,
+      selection_loading: false,
+      loading: false,
       on_selection_change: nil,
       data: []
     }
@@ -22,6 +25,46 @@ defmodule Cinder.SelectionTest do
       assigns: Map.merge(defaults, assigns),
       root_pid: self()
     }
+  end
+
+  describe "query-wide selection" do
+    test "tracks row toggles as exclusions and allows selecting them again" do
+      socket =
+        make_socket(%{
+          id: "test-table",
+          selectable: true,
+          selection_mode: :all_matching,
+          data: [%{id: "user-1"}]
+        })
+
+      {:noreply, socket} =
+        LiveComponent.handle_event("toggle_select", %{"id" => "user-1"}, socket)
+
+      assert socket.assigns.selected_ids == MapSet.new(["user-1"])
+
+      {:noreply, socket} =
+        LiveComponent.handle_event("toggle_select", %{"id" => "user-1"}, socket)
+
+      assert socket.assigns.selected_ids == MapSet.new()
+    end
+
+    test "an indeterminate query toggle clears exclusions before clearing the selection" do
+      socket =
+        make_socket(%{
+          id: "test-table",
+          selectable: true,
+          selection_mode: :all_matching,
+          selected_ids: MapSet.new(["user-1"])
+        })
+
+      {:noreply, socket} = LiveComponent.handle_event("toggle_select_all", %{}, socket)
+      assert socket.assigns.selection_mode == :all_matching
+      assert socket.assigns.selected_ids == MapSet.new()
+
+      {:noreply, socket} = LiveComponent.handle_event("toggle_select_all", %{}, socket)
+      assert socket.assigns.selection_mode == :explicit
+      assert socket.assigns.selected_ids == MapSet.new()
+    end
   end
 
   describe "toggle_select event" do
