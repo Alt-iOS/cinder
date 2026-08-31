@@ -594,6 +594,23 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert socket.assigns.current_page == 2
     end
 
+    test "changing from infinite to keyset mode reloads ordinary page data" do
+      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
+      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
+      {:ok, socket} = LiveComponent.update(assigns, socket)
+
+      socket =
+        socket
+        |> Phoenix.LiveView.cancel_async(:load_data)
+        |> Phoenix.Component.assign(:loading, false)
+        |> Phoenix.Component.assign(:data, [])
+
+      {:ok, keyset_socket} = LiveComponent.update(%{pagination_mode: :keyset}, socket)
+
+      assert keyset_socket.assigns.pagination_mode == :keyset
+      assert keyset_socket.assigns.loading
+    end
+
     test "preserves a disabled count mode" do
       {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
 
