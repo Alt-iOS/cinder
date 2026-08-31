@@ -1857,7 +1857,7 @@ defmodule Cinder.LiveComponent do
   # Keys that affect data queries - changes to these trigger a reload.
   # Note: actor, tenant, and scope are normalized separately to avoid
   # false positives from Ecto struct metadata differences.
-  @data_keys ~w(filters sort_by current_page page_size search_term query query_opts after_keyset before_keyset)a
+  @data_keys ~w(filters sort_by current_page page_size search_term query query_opts pagination_mode after_keyset before_keyset)a
   @count_keys ~w(filters search_term query query_opts action)a
 
   defp data_state(assigns) do
