@@ -45,6 +45,7 @@ defmodule Cinder.Renderers.SelectAll do
           data-selection-state={@state}
           disabled={@disabled}
           phx-click="toggle_select_all"
+          phx-disable-with=""
           phx-target={@myself}
         />
         <span
