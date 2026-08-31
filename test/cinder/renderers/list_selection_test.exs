@@ -64,6 +64,21 @@ defmodule Cinder.Renderers.ListSelectionTest do
       assert html =~ ~r/<div[^>]*class="mb-3"[^>]*>\s*<label/
     end
 
+    test "can hide select all while retaining item checkboxes" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          selectable: true,
+          select_all: false,
+          data: [%{id: "item-1", name: "Item 1"}]
+        })
+
+      html = render_component(&ListRenderer.render/1, assigns)
+
+      refute html =~ "toggle_select_all"
+      assert html =~ ~s(phx-click="toggle_select")
+    end
+
     test "renders leading checkbox with theme classes when selectable=true" do
       assigns =
         base_assigns()

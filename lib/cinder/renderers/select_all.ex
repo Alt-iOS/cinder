@@ -10,6 +10,7 @@ defmodule Cinder.Renderers.SelectAll do
   attr :id_field, :atom, required: true
   attr :loading, :boolean, required: true
   attr :label, :string, default: nil
+  attr :mode, :atom, default: :query
   attr :myself, :any, required: true
   attr :page_ids, :any, default: nil
   attr :pending, :boolean, default: false
@@ -23,7 +24,7 @@ defmodule Cinder.Renderers.SelectAll do
     page_ids =
       assigns.page_ids || Selection.page_ids(assigns.data, assigns.id_field, assigns.selectable)
 
-    selection_ids = assigns.scope_ids || page_ids
+    selection_ids = if assigns.mode == :query, do: assigns.scope_ids || page_ids, else: page_ids
 
     state =
       if assigns.pending, do: :all, else: selection_state(assigns.selected_ids, selection_ids)
@@ -31,7 +32,11 @@ defmodule Cinder.Renderers.SelectAll do
     assigns =
       assigns
       |> assign(:disabled, assigns.loading or MapSet.size(selection_ids) == 0)
-      |> assign(:label, assigns.label || dgettext("cinder", "Select all filtered items"))
+      |> assign(
+        :event,
+        if(assigns.mode == :page, do: "toggle_select_all_page", else: "toggle_select_all")
+      )
+      |> assign(:label, assigns.label || default_label(assigns.mode))
       |> assign(:state, state)
 
     ~H"""
@@ -47,7 +52,7 @@ defmodule Cinder.Renderers.SelectAll do
           data-key="selection_checkbox_class"
           data-selection-state={@state}
           disabled={@disabled}
-          phx-click="toggle_select_all"
+          phx-click={@event}
           phx-disable-with=""
           phx-target={@myself}
         />
@@ -63,6 +68,9 @@ defmodule Cinder.Renderers.SelectAll do
     </label>
     """
   end
+
+  defp default_label(:page), do: dgettext("cinder", "Select all visible items")
+  defp default_label(_mode), do: dgettext("cinder", "Select all filtered items")
 
   defp selection_state(selected_ids, selection_ids) do
     cond do

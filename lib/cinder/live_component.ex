@@ -1756,6 +1756,7 @@ defmodule Cinder.LiveComponent do
     |> assign_new(:infinite_stream_configured?, fn -> false end)
     # Selection state
     |> assign(:selectable, assigns[:selectable] || false)
+    |> assign(:select_all, Map.get(assigns, :select_all, :query))
     |> assign_new(:selected_ids, fn -> MapSet.new() end)
     |> assign_new(:selection_scope_ids, fn -> nil end)
     |> assign_new(:selection_attempt, fn -> nil end)
@@ -1877,7 +1878,7 @@ defmodule Cinder.LiveComponent do
     })
   end
 
-  @selection_scope_keys ~w(filters search_term query query_opts action selectable id_field search_fn)a
+  @selection_scope_keys ~w(filters search_term query query_opts action selectable select_all id_field search_fn)a
 
   defp selection_scope_state(assigns) do
     Map.merge(Map.take(assigns, @selection_scope_keys), %{
