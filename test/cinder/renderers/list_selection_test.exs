@@ -59,6 +59,7 @@ defmodule Cinder.Renderers.ListSelectionTest do
       html = render_component(&ListRenderer.render/1, Map.put(base_assigns(), :selectable, true))
 
       assert html =~ ~s(phx-click="toggle_select_all")
+      assert html =~ ~s(phx-disable-with="")
       assert html =~ "Select all filtered items"
       assert html =~ ~r/<div[^>]*class="mb-3"[^>]*>\s*<label/
     end
