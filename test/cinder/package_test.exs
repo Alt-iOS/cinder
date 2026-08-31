@@ -7,4 +7,12 @@ defmodule Cinder.PackageTest do
     assert "priv" in package_files
     assert File.regular?("priv/static/cinder_hooks.js")
   end
+
+  test "infinite stream hook mirrors the root selection lock into retained checkboxes" do
+    hooks = File.read!("priv/static/cinder_hooks.js")
+
+    assert hooks =~ ~s|hasAttribute("data-selection-locked")|
+    assert hooks =~ "checkbox.disabled"
+    assert hooks =~ ~s|hasAttribute("data-cinder-selection-disabled")|
+  end
 end

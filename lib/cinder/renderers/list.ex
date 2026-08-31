@@ -52,6 +52,7 @@ defmodule Cinder.Renderers.List do
       class={[@theme.container_class, "relative"]}
       data-key="container_class"
       data-cinder-infinite-root={@pagination_mode == :infinite}
+      data-selection-locked={if @pagination_mode == :infinite, do: @selection_locked}
       data-selected-ids={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_ids(@selected_ids, Map.get(assigns, :infinite_item_ids))}
       data-selected-classes={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_classes(InfiniteStream.selected_classes(Map.get(@theme, :selected_item_class)))}
       id={if @pagination_mode == :infinite, do: "#{@id}-infinite-stream"}
@@ -157,6 +158,7 @@ defmodule Cinder.Renderers.List do
                 phx-target={@myself}
                 class={@theme.selection_checkbox_class}
                 data-cinder-selection-checkbox
+                data-cinder-selection-disabled={not payload.selectable?}
                 data-key="selection_checkbox_class"
               />
             </div>
