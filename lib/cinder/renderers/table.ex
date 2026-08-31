@@ -27,6 +27,7 @@ defmodule Cinder.Renderers.Table do
       |> assign_infinite_defaults()
       |> assign_new(:show_item_numbers, fn -> false end)
       |> assign_new(:current_page, fn -> 1 end)
+      |> assign(:selection_locked, Map.get(assigns, :selection_loading, false))
       |> assign(
         :show_loading_state,
         assigns.loading and not Map.get(assigns, :silent_refresh, false)
@@ -131,18 +132,18 @@ defmodule Cinder.Renderers.Table do
             <tr
                 :for={{dom_id, payload} <- @stream_items} :if={@pagination_mode == :infinite}
                 id={dom_id}
-                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, @selectable, @selected_ids, payload.record, @id_field, Map.get(@theme, :selected_row_class))}
+                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, payload.record, @id_field, Map.get(@theme, :selected_row_class))}
                 data-item-id={payload.id}
                 data-item-number={payload.number}
                 data-key="row_class"
-                phx-click={selection_click_action(@row_click, @selectable, @selected_ids, payload.record, @id_field, @myself)}>
+                phx-click={selection_click_action(@row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, payload.record, @id_field, @myself)}>
               <td :if={@show_item_numbers} class={[@theme.td_class, "w-10"]} data-item-number>
                 {payload.number}
               </td>
               <td :if={Selection.enabled?(@selectable)} class={[@theme.td_class, "w-10"]} data-key="td_class">
                 <input
                   type="checkbox"
-                  disabled={not Selection.item_toggleable?(@selectable, @selected_ids, payload.record, @id_field)}
+                  disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @selected_ids, payload.record, @id_field)}
                   checked={Selection.item_selected?(@selected_ids, payload.record, @id_field)}
                   phx-click="toggle_select"
                   phx-value-id={payload.id}
@@ -157,18 +158,18 @@ defmodule Cinder.Renderers.Table do
               </td>
             </tr>
             <tr :for={{item, index} <- Enum.with_index(@data)} :if={@pagination_mode != :infinite and not @error}
-                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, @selectable, @selected_ids, item, @id_field, Map.get(@theme, :selected_row_class))}
+                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, item, @id_field, Map.get(@theme, :selected_row_class))}
                 data-item-id={to_string(Map.get(item, @id_field))}
                 data-item-number={item_number(index, @pagination_mode, @current_page, @page)}
                 data-key="row_class"
-                phx-click={selection_click_action(@row_click, @selectable, @selected_ids, item, @id_field, @myself)}>
+                phx-click={selection_click_action(@row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, item, @id_field, @myself)}>
               <td :if={@show_item_numbers} class={[@theme.td_class, "w-10"]} data-item-number>
                 {item_number(index, @pagination_mode, @current_page, @page)}
               </td>
               <td :if={Selection.enabled?(@selectable)} class={[@theme.td_class, "w-10"]} data-key="td_class">
                 <input
                   type="checkbox"
-                  disabled={not Selection.item_toggleable?(@selectable, @selected_ids, item, @id_field)}
+                  disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @selected_ids, item, @id_field)}
                   checked={Selection.item_selected?(@selected_ids, item, @id_field)}
                   phx-click="toggle_select"
                   phx-value-id={to_string(Map.get(item, @id_field))}
