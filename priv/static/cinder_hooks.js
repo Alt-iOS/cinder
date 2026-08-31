@@ -33,17 +33,22 @@ const CinderInfiniteStream = {
   },
 
   syncSelection() {
-    const signature = `${this.el.dataset.selectedIds || "[]"}\n${this.el.dataset.selectedClasses || "[]"}`;
+    const signature = `${this.el.dataset.selectedIds || "[]"}\n${this.el.dataset.selectedClasses || "[]"}\n${this.el.hasAttribute("data-selection-locked")}`;
     if (signature === this.appliedSelectionState) return;
 
     this.appliedSelectionState = signature;
     const selected = new Set(JSON.parse(this.el.dataset.selectedIds || "[]"));
     const selectedClasses = JSON.parse(this.el.dataset.selectedClasses || "[]");
+    const selectionLocked = this.el.hasAttribute("data-selection-locked");
 
     this.el.querySelectorAll("[data-item-id]").forEach((item) => {
       const isSelected = selected.has(item.dataset.itemId);
       const checkbox = item.querySelector("[data-cinder-selection-checkbox]");
-      if (checkbox) checkbox.checked = isSelected;
+      if (checkbox) {
+        checkbox.checked = isSelected;
+        checkbox.disabled =
+          selectionLocked || checkbox.hasAttribute("data-cinder-selection-disabled");
+      }
       selectedClasses.forEach((name) => item.classList.toggle(name, isSelected));
     });
   },
