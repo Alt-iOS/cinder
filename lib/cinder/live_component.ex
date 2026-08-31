@@ -658,16 +658,9 @@ defmodule Cinder.LiveComponent do
   end
 
   def handle_event("toggle_select", %{"id" => id}, socket) do
-    selected_ids = socket.assigns.selected_ids
+    new_selected = toggle_selected_id(socket, id)
 
-    new_selected =
-      cond do
-        MapSet.member?(selected_ids, id) -> MapSet.delete(selected_ids, id)
-        id_selectable?(socket, id) -> MapSet.put(selected_ids, id)
-        true -> selected_ids
-      end
-
-    if MapSet.equal?(new_selected, selected_ids) do
+    if MapSet.equal?(new_selected, socket.assigns.selected_ids) do
       {:noreply, socket}
     else
       socket =
@@ -720,32 +713,30 @@ defmodule Cinder.LiveComponent do
   end
 
   def handle_event("toggle_select_all", _params, socket) do
-    scope_ids = socket.assigns.selection_scope_ids
+    cond do
+      socket.assigns.selection_mode == :all_matching ->
+        socket =
+          if MapSet.size(socket.assigns.selected_ids) == 0 do
+            clear_selection_state(socket)
+          else
+            assign(socket, :selected_ids, MapSet.new())
+          end
+          |> notify_selection_change(:select_all)
 
-    if is_struct(scope_ids, MapSet) and MapSet.subset?(scope_ids, socket.assigns.selected_ids) do
-      socket =
-        socket
-        |> assign(:selected_ids, MapSet.difference(socket.assigns.selected_ids, scope_ids))
-        |> notify_selection_change(:select_all)
+        {:noreply, socket}
 
-      {:noreply, socket}
-    else
-      attempt = make_ref()
-      socket = assign(socket, selection_attempt: attempt, selection_loading: true)
-      options = selection_query_options(socket)
-      resource = socket.assigns.query
-      id_field = socket.assigns.id_field
-      selectable = socket.assigns.selectable
+      socket.assigns.selectable == true ->
+        socket =
+          socket
+          |> assign(:selection_mode, :all_matching)
+          |> assign(:selected_ids, MapSet.new())
+          |> assign(:selection_scope_ids, nil)
+          |> notify_selection_change(:select_all)
 
-      if Application.get_env(:ash, :disable_async?) do
-        result = Cinder.Selection.filtered_ids(resource, options, id_field, selectable)
-        {:noreply, apply_select_all_result(socket, attempt, result)}
-      else
-        {:noreply,
-         start_async(socket, {:select_all, attempt}, fn ->
-           Cinder.Selection.filtered_ids(resource, options, id_field, selectable)
-         end)}
-      end
+        {:noreply, socket}
+
+      true ->
+        toggle_materialized_select_all(socket)
     end
   end
 
@@ -753,10 +744,7 @@ defmodule Cinder.LiveComponent do
   def handle_event("clear_selection", _params, socket) do
     socket =
       socket
-      |> assign(:selected_ids, MapSet.new())
-      |> assign(:selection_scope_ids, nil)
-      |> assign(:selection_attempt, nil)
-      |> assign(:selection_loading, false)
+      |> clear_selection_state()
       |> notify_selection_change(:clear)
 
     {:noreply, socket}
@@ -780,13 +768,10 @@ defmodule Cinder.LiveComponent do
         {:noreply, socket}
 
       true ->
-        selected_ids =
-          case socket.assigns[:bulk_action_confirmation] do
-            %{index: ^index, selected_ids: selected_ids} -> selected_ids
-            _ -> socket.assigns.selected_ids
-          end
-
-        execute_bulk_action(slot, selected_ids, socket)
+        case selection_snapshot(socket) do
+          {:ok, selection} -> execute_bulk_action(slot, selection, socket)
+          {:error, reason} -> handle_bulk_action_error(slot, socket, reason)
+        end
     end
   end
 
@@ -795,14 +780,14 @@ defmodule Cinder.LiveComponent do
     slots = socket.assigns[:bulk_action_slots] || []
 
     case socket.assigns[:bulk_action_confirmation] do
-      %{index: index, selected_ids: selected_ids, data: _data} ->
+      %{index: index, selection: selection, data: _data} ->
         case Enum.at(slots, index) do
           nil ->
             Logger.warning("Cinder: Bulk action slot not found at index #{index}")
             {:noreply, socket}
 
           slot ->
-            execute_bulk_action(slot, selected_ids, socket)
+            execute_bulk_action(slot, selection, socket)
         end
 
       _not_ready ->
@@ -816,20 +801,24 @@ defmodule Cinder.LiveComponent do
 
     with slot when not is_nil(slot) <- Enum.at(slots, index),
          false <- preparation_running?(socket.assigns[:bulk_action_confirmation], index),
-         selected_ids <- socket.assigns.selected_ids,
-         true <- MapSet.size(selected_ids) > 0 do
+         true <- selection_active?(socket.assigns),
+         {:ok, selection} <- selection_snapshot(socket) do
       attempt = make_ref()
 
       context = %{
-        selected_ids: selected_ids,
-        selected_count: MapSet.size(selected_ids),
+        selected_ids: selection.selected_ids,
+        selected_count: selection.count,
+        selection_mode: selection.mode,
         action: slot[:action]
       }
 
       confirmation = %{
         index: index,
         attempt: attempt,
-        selected_ids: selected_ids
+        selection: selection,
+        selected_ids: selection.selected_ids,
+        selected_count: selection.count,
+        selection_mode: selection.mode
       }
 
       socket = assign(socket, :bulk_action_confirmation, confirmation)
@@ -916,54 +905,92 @@ defmodule Cinder.LiveComponent do
   # BULK ACTION HELPERS
   # ============================================================================
 
-  defp execute_bulk_action(slot, selected_ids, socket) do
-    action = slot[:action]
-    selected_id_list = MapSet.to_list(selected_ids)
+  defp toggle_materialized_select_all(socket) do
+    scope_ids = socket.assigns.selection_scope_ids
 
-    if selected_id_list == [] do
+    if is_struct(scope_ids, MapSet) and MapSet.subset?(scope_ids, socket.assigns.selected_ids) do
+      socket =
+        socket
+        |> assign(:selected_ids, MapSet.difference(socket.assigns.selected_ids, scope_ids))
+        |> notify_selection_change(:select_all)
+
       {:noreply, socket}
     else
-      resource = extract_resource(socket.assigns)
+      attempt = make_ref()
+      socket = assign(socket, selection_attempt: attempt, selection_loading: true)
+      options = selection_query_options(socket)
+      resource = socket.assigns.query
+      id_field = socket.assigns.id_field
+      selectable = socket.assigns.selectable
 
-      if resource do
-        result =
-          Cinder.BulkActionExecutor.execute(action,
-            resource: resource,
-            ids: selected_id_list,
-            id_field: socket.assigns[:id_field] || :id,
-            actor: socket.assigns[:actor],
-            tenant: socket.assigns[:tenant],
-            scope: socket.assigns[:scope],
-            action_opts: slot[:action_opts] || []
-          )
-
-        handle_bulk_action_result(result, slot, selected_ids, socket)
+      if Application.get_env(:ash, :disable_async?) do
+        result = Cinder.Selection.filtered_ids(resource, options, id_field, selectable)
+        {:noreply, apply_select_all_result(socket, attempt, result)}
       else
-        Logger.error("Cinder: No resource configured for bulk action")
-        {:noreply, socket}
+        {:noreply,
+         start_async(socket, {:select_all, attempt}, fn ->
+           Cinder.Selection.filtered_ids(resource, options, id_field, selectable)
+         end)}
       end
     end
   end
 
-  defp handle_bulk_action_result(result, slot, selected_ids, socket) do
+  defp selection_snapshot(%{assigns: %{selection_mode: :all_matching}} = socket) do
+    with {:ok, query} <-
+           Cinder.Selection.all_matching_query(
+             socket.assigns.query,
+             selection_query_options(socket)
+           ) do
+      {:ok,
+       %{
+         mode: :all_matching,
+         query: query,
+         selected_ids: socket.assigns.selected_ids,
+         count: selected_count(socket.assigns)
+       }}
+    end
+  end
+
+  defp selection_snapshot(socket) do
+    {:ok,
+     %{
+       mode: :explicit,
+       selected_ids: socket.assigns.selected_ids,
+       count: MapSet.size(socket.assigns.selected_ids)
+     }}
+  end
+
+  defp execute_bulk_action(slot, selection, socket) do
+    action = slot[:action]
+    resource = extract_resource(socket.assigns)
+
+    if resource do
+      result = execute_selection(action, selection, resource, slot, socket)
+      handle_bulk_action_result(result, slot, selection, socket)
+    else
+      Logger.error("Cinder: No resource configured for bulk action")
+      {:noreply, socket}
+    end
+  end
+
+  defp handle_bulk_action_result(result, slot, selection, socket) do
     case result do
       {:ok, bulk_result} ->
-        handle_bulk_action_success(slot, selected_ids, socket, bulk_result)
+        handle_bulk_action_success(slot, selection, socket, bulk_result)
 
       {:error, reason} ->
         handle_bulk_action_error(slot, socket, reason)
     end
   end
 
-  defp handle_bulk_action_success(slot, selected_ids, socket, result) do
-    selected_count = MapSet.size(selected_ids)
-    remaining_ids = MapSet.difference(socket.assigns.selected_ids, selected_ids)
+  defp handle_bulk_action_success(slot, selection, socket, result) do
+    remaining_ids = MapSet.difference(socket.assigns.selected_ids, selection.selected_ids)
 
     socket =
       socket
       |> assign(:bulk_action_confirmation, nil)
       |> assign(:selected_ids, remaining_ids)
-      |> invalidate_selection_scope()
+      |> clear_executed_selection(selection.mode)
       |> notify_selection_change(:clear)
       |> load_data()
 
@@ -974,13 +1001,41 @@ defmodule Cinder.LiveComponent do
          %{
            component_id: socket.assigns.id,
            action: slot[:action],
-           count: selected_count,
+           count: selection.count,
            result: result
          }}
       )
     end
 
     {:noreply, socket}
+  end
+
+  defp clear_executed_selection(socket, :all_matching), do: clear_selection_state(socket)
+  defp clear_executed_selection(socket, _explicit), do: invalidate_selection_scope(socket)
+
+  defp execute_selection(action, %{mode: :all_matching} = selection, resource, slot, socket) do
+    Cinder.BulkActionExecutor.execute(action,
+      resource: resource,
+      query: selection.query,
+      exclude_ids: MapSet.to_list(selection.selected_ids),
+      id_field: socket.assigns[:id_field] || :id,
+      actor: socket.assigns[:actor],
+      tenant: socket.assigns[:tenant],
+      scope: socket.assigns[:scope],
+      action_opts: slot[:action_opts] || []
+    )
+  end
+
+  defp execute_selection(action, selection, resource, slot, socket) do
+    Cinder.BulkActionExecutor.execute(action,
+      resource: resource,
+      ids: MapSet.to_list(selection.selected_ids),
+      id_field: socket.assigns[:id_field] || :id,
+      actor: socket.assigns[:actor],
+      tenant: socket.assigns[:tenant],
+      scope: socket.assigns[:scope],
+      action_opts: slot[:action_opts] || []
+    )
   end
 
   defp handle_bulk_action_error(slot, socket, reason) do
@@ -1047,7 +1102,7 @@ defmodule Cinder.LiveComponent do
 
   defp maybe_notify_query_change(socket, query) do
     if event_name = socket.assigns[:on_query_change] do
-      payload = %{query: query, count: page_count(socket.assigns[:page]), id: socket.assigns.id}
+      payload = %{query: query, count: socket.assigns[:total_count], id: socket.assigns.id}
       send(self(), {event_name, payload})
     end
 
@@ -1078,12 +1133,59 @@ defmodule Cinder.LiveComponent do
     end
   end
 
+  defp toggle_selected_id(%{assigns: %{selection_mode: :all_matching}} = socket, id) do
+    selected_ids = socket.assigns.selected_ids
+
+    cond do
+      MapSet.member?(selected_ids, id) -> MapSet.delete(selected_ids, id)
+      id_selectable?(socket, id) -> MapSet.put(selected_ids, id)
+      true -> selected_ids
+    end
+  end
+
+  defp toggle_selected_id(socket, id) do
+    selected_ids = socket.assigns.selected_ids
+
+    cond do
+      MapSet.member?(selected_ids, id) -> MapSet.delete(selected_ids, id)
+      id_selectable?(socket, id) -> MapSet.put(selected_ids, id)
+      true -> selected_ids
+    end
+  end
+
+  defp clear_selection_state(socket) do
+    socket
+    |> assign(:selection_mode, :explicit)
+    |> assign(:selected_ids, MapSet.new())
+    |> assign(:selection_scope_ids, nil)
+    |> assign(:selection_attempt, nil)
+    |> assign(:selection_loading, false)
+  end
+
+  defp selected_count(%{selection_mode: :all_matching} = assigns) do
+    total_count = assigns[:total_count] || (assigns[:page] && Map.get(assigns.page, :count))
+
+    case total_count do
+      count when is_integer(count) ->
+        max(count - MapSet.size(assigns.selected_ids), 0)
+
+      _unknown ->
+        nil
+    end
+  end
+
+  defp selected_count(assigns), do: MapSet.size(assigns.selected_ids)
+
+  defp selection_active?(%{selection_mode: :all_matching}), do: true
+  defp selection_active?(assigns), do: MapSet.size(assigns.selected_ids) > 0
+
   defp notify_selection_change(socket, action) do
     if event_name = socket.assigns[:on_selection_change] do
       payload = %{
         component_id: socket.assigns.id,
         selected_ids: socket.assigns.selected_ids,
-        selected_count: MapSet.size(socket.assigns.selected_ids),
+        selected_count: selected_count(socket.assigns),
+        selection_mode: Map.get(socket.assigns, :selection_mode, :explicit),
         action: action
       }
 
@@ -1761,6 +1863,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:selectable, assigns[:selectable] || false)
     |> assign(:select_all, Map.get(assigns, :select_all, :query))
     |> assign_new(:selected_ids, fn -> MapSet.new() end)
+    |> assign_new(:selection_mode, fn -> :explicit end)
     |> assign_new(:selection_scope_ids, fn -> nil end)
     |> assign_new(:selection_attempt, fn -> nil end)
     |> assign_new(:selection_loading, fn -> false end)
@@ -2056,6 +2159,7 @@ defmodule Cinder.LiveComponent do
         {:ok, scope_ids} ->
           socket
           |> assign(
+            selection_mode: :explicit,
             selected_ids: MapSet.union(socket.assigns.selected_ids, scope_ids),
             selection_scope_ids: scope_ids,
             selection_attempt: nil,
@@ -2073,7 +2177,11 @@ defmodule Cinder.LiveComponent do
   end
 
   defp invalidate_selection_scope(socket) do
-    assign(socket, selection_scope_ids: nil, selection_attempt: nil, selection_loading: false)
+    if socket.assigns.selection_mode == :all_matching do
+      clear_selection_state(socket)
+    else
+      assign(socket, selection_scope_ids: nil, selection_attempt: nil, selection_loading: false)
+    end
   end
 
   defp maybe_invalidate_selection_scope(socket, previous) do
@@ -2095,7 +2203,7 @@ defmodule Cinder.LiveComponent do
   end
 
   defp maybe_store_sync_count(%{assigns: %{count_mode: :sync}} = socket, page) do
-    assign(socket, :total_count, Map.get(page, :count))
+    assign(socket, :total_count, page_count(page))
   end
 
   defp maybe_store_sync_count(socket, _page), do: socket

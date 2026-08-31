@@ -32,6 +32,10 @@ defmodule Cinder.Renderers.Table do
         :show_loading_state,
         assigns.loading and not Map.get(assigns, :silent_refresh, false)
       )
+      |> assign(
+        :render_selected_ids,
+        rendered_selected_ids(assigns)
+      )
 
     ~H"""
     <div
@@ -39,7 +43,7 @@ defmodule Cinder.Renderers.Table do
       data-key="container_class"
       data-cinder-infinite-root={@pagination_mode == :infinite}
       data-selection-locked={if @pagination_mode == :infinite, do: @selection_locked}
-      data-selected-ids={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_ids(@selected_ids, Map.get(assigns, :infinite_item_ids))}
+      data-selected-ids={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_ids(@render_selected_ids, Map.get(assigns, :infinite_item_ids))}
       data-selected-classes={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_classes(InfiniteStream.selected_classes(Map.get(@theme, :selected_row_class)))}
       id={if @pagination_mode == :infinite, do: "#{@id}-infinite-stream"}
       phx-hook={if @pagination_mode == :infinite, do: "CinderInfiniteStream"}
@@ -67,6 +71,8 @@ defmodule Cinder.Renderers.Table do
       <BulkActions.render
         selectable={@selectable}
         selected_ids={@selected_ids}
+        selection_mode={Map.get(assigns, :selection_mode, :explicit)}
+        total_count={Map.get(assigns, :total_count) || (@page && Map.get(@page, :count))}
         bulk_action_slots={@bulk_action_slots}
         bulk_action_confirmation_slot={Map.get(assigns, :bulk_action_confirmation_slot, [])}
         bulk_action_confirmation={Map.get(assigns, :bulk_action_confirmation)}
@@ -103,6 +109,7 @@ defmodule Cinder.Renderers.Table do
                   scope_ids={if Map.get(assigns, :select_all, :query) == :query, do: Map.get(assigns, :selection_scope_ids)}
                   selectable={@selectable}
                   selected_ids={@selected_ids}
+                  selection_mode={Map.get(assigns, :selection_mode, :explicit)}
                   show_label={false}
                   theme={@theme}
                 />
@@ -133,25 +140,25 @@ defmodule Cinder.Renderers.Table do
             <tr
                 :for={{dom_id, payload} <- @stream_items} :if={@pagination_mode == :infinite}
                 id={dom_id}
-                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, payload.record, @id_field, Map.get(@theme, :selected_row_class))}
+                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, if(@selection_locked, do: false, else: @selectable), @render_selected_ids, payload.record, @id_field, Map.get(@theme, :selected_row_class))}
                 data-item-id={payload.id}
                 data-item-number={payload.number}
                 data-key="row_class"
-                phx-click={selection_click_action(@row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, payload.record, @id_field, @myself)}>
+                phx-click={selection_click_action(@row_click, if(@selection_locked, do: false, else: @selectable), @render_selected_ids, payload.record, @id_field, @myself)}>
               <td :if={@show_item_numbers} class={[@theme.td_class, "w-10"]} data-item-number>
                 {payload.number}
               </td>
               <td :if={Selection.enabled?(@selectable)} class={[@theme.td_class, "w-10"]} data-key="td_class">
                 <input
                   type="checkbox"
-                  disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @selected_ids, payload.record, @id_field)}
-                  checked={Selection.item_selected?(@selected_ids, payload.record, @id_field)}
+                  disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @render_selected_ids, payload.record, @id_field)}
+                  checked={Selection.item_selected?(@render_selected_ids, payload.record, @id_field)}
                   phx-click="toggle_select"
                   phx-value-id={payload.id}
                   phx-target={@myself}
                   class={@theme.selection_checkbox_class}
                   data-cinder-selection-checkbox
-                  data-cinder-selection-disabled={not Selection.item_toggleable?(@selectable, @selected_ids, payload.record, @id_field)}
+                  data-cinder-selection-disabled={not Selection.item_toggleable?(@selectable, @render_selected_ids, payload.record, @id_field)}
                   data-key="selection_checkbox_class"
                 />
               </td>
@@ -160,19 +167,19 @@ defmodule Cinder.Renderers.Table do
               </td>
             </tr>
             <tr :for={{item, index} <- Enum.with_index(@data)} :if={@pagination_mode != :infinite and not @error}
-                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, item, @id_field, Map.get(@theme, :selected_row_class))}
+                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, if(@selection_locked, do: false, else: @selectable), @render_selected_ids, item, @id_field, Map.get(@theme, :selected_row_class))}
                 data-item-id={to_string(Map.get(item, @id_field))}
                 data-item-number={item_number(index, @pagination_mode, @current_page, @page)}
                 data-key="row_class"
-                phx-click={selection_click_action(@row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, item, @id_field, @myself)}>
+                phx-click={selection_click_action(@row_click, if(@selection_locked, do: false, else: @selectable), @render_selected_ids, item, @id_field, @myself)}>
               <td :if={@show_item_numbers} class={[@theme.td_class, "w-10"]} data-item-number>
                 {item_number(index, @pagination_mode, @current_page, @page)}
               </td>
               <td :if={Selection.enabled?(@selectable)} class={[@theme.td_class, "w-10"]} data-key="td_class">
                 <input
                   type="checkbox"
-                  disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @selected_ids, item, @id_field)}
-                  checked={Selection.item_selected?(@selected_ids, item, @id_field)}
+                  disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @render_selected_ids, item, @id_field)}
+                  checked={Selection.item_selected?(@render_selected_ids, item, @id_field)}
                   phx-click="toggle_select"
                   phx-value-id={to_string(Map.get(item, @id_field))}
                   phx-target={@myself}
@@ -270,6 +277,23 @@ defmodule Cinder.Renderers.Table do
   # ============================================================================
   # HELPER FUNCTIONS
   # ============================================================================
+
+  defp rendered_selected_ids(%{pagination_mode: :infinite} = assigns) do
+    Selection.rendered_selected_ids_from_ids(
+      Map.get(assigns, :selection_mode, :explicit),
+      assigns.selected_ids,
+      Map.get(assigns, :infinite_item_ids, MapSet.new())
+    )
+  end
+
+  defp rendered_selected_ids(assigns) do
+    Selection.rendered_selected_ids(
+      Map.get(assigns, :selection_mode, :explicit),
+      assigns.selected_ids,
+      assigns.data,
+      assigns.id_field
+    )
+  end
 
   defp column_count(columns, selectable, show_item_numbers) do
     base_count = length(columns)

@@ -42,6 +42,7 @@ defmodule Cinder.Integration.LiveViewTest do
       page_size={3}
       window_size={6}
       overscan={0}
+      selectable
       show_item_numbers
     >
       <:col :let={album} field="title">{album.title}</:col>
@@ -188,6 +189,76 @@ defmodule Cinder.Integration.LiveViewTest do
       end)
       |> assert_has("button", text: "Archive (3)")
     end
+
+    test "infinite query deselections survive DOM window pruning", %{conn: conn} do
+      path = Cinder.TestLive.Fixture.register(&infinite_album_collection/1)
+
+      conn
+      |> visit(path)
+      |> unwrap(fn view ->
+        first_id = item_id(view, 1)
+        second_id = item_id(view, 2)
+
+        view
+        |> Phoenix.LiveViewTest.element("input[phx-click=toggle_select_all]")
+        |> Phoenix.LiveViewTest.render_click()
+
+        assert first_id in selected_ids(view)
+        assert second_id in selected_ids(view)
+
+        view
+        |> Phoenix.LiveViewTest.element(
+          "tr[data-item-number=\"1\"] input[phx-click=toggle_select]"
+        )
+        |> Phoenix.LiveViewTest.render_click()
+
+        refute first_id in selected_ids(view)
+        assert second_id in selected_ids(view)
+
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
+        |> Phoenix.LiveViewTest.render_click()
+
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
+        |> Phoenix.LiveViewTest.render_click()
+
+        refute Phoenix.LiveViewTest.has_element?(view, "tr[data-item-number=\"1\"]")
+
+        view
+        |> Phoenix.LiveViewTest.element("button[phx-click=load_previous]")
+        |> Phoenix.LiveViewTest.render_click()
+
+        assert Phoenix.LiveViewTest.has_element?(view, "tr[data-item-number=\"1\"]")
+        refute first_id in selected_ids(view)
+        assert second_id in selected_ids(view)
+
+        Phoenix.LiveViewTest.render(view)
+      end)
+    end
+  end
+
+  defp item_id(view, number) do
+    html =
+      view
+      |> Phoenix.LiveViewTest.element("tr[data-item-number=\"#{number}\"]")
+      |> Phoenix.LiveViewTest.render()
+
+    [_, id] = Regex.run(~r/data-item-id="([^"]+)"/, html)
+    id
+  end
+
+  defp selected_ids(view) do
+    html =
+      view
+      |> Phoenix.LiveViewTest.element("#infinite-albums-infinite-stream")
+      |> Phoenix.LiveViewTest.render()
+
+    [_, encoded] = Regex.run(~r/data-selected-ids="([^"]*)"/, html)
+
+    encoded
+    |> String.replace("&quot;", "\"")
+    |> Jason.decode!()
   end
 
   describe "initial render" do

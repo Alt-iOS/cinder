@@ -45,6 +45,7 @@ defmodule Cinder.Renderers.Grid do
         assigns.loading and not Map.get(assigns, :silent_refresh, false)
       )
       |> assign(:has_item_slot, has_item_slot)
+      |> assign(:render_selected_ids, rendered_selected_ids(assigns))
       |> assign(:grid_container_class, container_class)
       |> assign(:grid_item_class, item_class)
       |> assign(:grid_item_data_key, item_data_key)
@@ -55,7 +56,7 @@ defmodule Cinder.Renderers.Grid do
       data-key="container_class"
       data-cinder-infinite-root={@pagination_mode == :infinite}
       data-selection-locked={if @pagination_mode == :infinite, do: @selection_locked}
-      data-selected-ids={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_ids(@selected_ids, Map.get(assigns, :infinite_item_ids))}
+      data-selected-ids={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_ids(@render_selected_ids, Map.get(assigns, :infinite_item_ids))}
       data-selected-classes={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_classes(InfiniteStream.selected_classes(Map.get(@theme, :selected_item_class)))}
       id={if @pagination_mode == :infinite, do: "#{@id}-infinite-stream"}
       phx-hook={if @pagination_mode == :infinite, do: "CinderInfiniteStream"}
@@ -96,6 +97,8 @@ defmodule Cinder.Renderers.Grid do
       <BulkActions.render
         selectable={@selectable}
         selected_ids={@selected_ids}
+        selection_mode={Map.get(assigns, :selection_mode, :explicit)}
+        total_count={Map.get(assigns, :total_count) || (@page && Map.get(@page, :count))}
         bulk_action_slots={@bulk_action_slots}
         bulk_action_confirmation_slot={Map.get(assigns, :bulk_action_confirmation_slot, [])}
         bulk_action_confirmation={Map.get(assigns, :bulk_action_confirmation)}
@@ -116,6 +119,7 @@ defmodule Cinder.Renderers.Grid do
           scope_ids={if Map.get(assigns, :select_all, :query) == :query, do: Map.get(assigns, :selection_scope_ids)}
           selectable={@selectable}
           selected_ids={@selected_ids}
+          selection_mode={Map.get(assigns, :selection_mode, :explicit)}
           theme={@theme}
         />
       </div>
@@ -137,11 +141,11 @@ defmodule Cinder.Renderers.Grid do
           <div
             :for={{dom_id, payload} <- @stream_items} :if={@pagination_mode == :infinite}
             id={dom_id}
-            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), payload.record, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
+            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), @render_selected_ids, payload.record, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
             data-item-id={payload.id}
             data-item-number={payload.number}
             data-key={@grid_item_data_key}
-            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), payload.record, Map.get(assigns, :id_field, :id), @myself)}
+            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), @render_selected_ids, payload.record, Map.get(assigns, :id_field, :id), @myself)}
           >
             <span :if={@show_item_numbers} class={@theme.pagination_count_class} data-item-number>
               {payload.number}.
@@ -154,7 +158,7 @@ defmodule Cinder.Renderers.Grid do
               <input
                 type="checkbox"
                 disabled={@selection_locked or not payload.selectable?}
-                checked={Selection.item_selected?(@selected_ids, payload.record, @id_field)}
+                checked={Selection.item_selected?(@render_selected_ids, payload.record, @id_field)}
                 phx-click="toggle_select"
                 phx-value-id={payload.id}
                 phx-target={@myself}
@@ -168,11 +172,11 @@ defmodule Cinder.Renderers.Grid do
           </div>
           <div
             :for={{item, index} <- Enum.with_index(@data)} :if={@pagination_mode != :infinite and not @error}
-            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
+            class={selection_classes(@grid_item_class, Map.get(assigns, :item_class), @item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), @render_selected_ids, item, Map.get(assigns, :id_field, :id), Map.get(@theme, :selected_item_class))}
             data-item-id={to_string(Map.get(item, @id_field))}
             data-item-number={item_number(index, @pagination_mode, @current_page, @page)}
             data-key={@grid_item_data_key}
-            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id), @myself)}
+            phx-click={selection_click_action(@item_click, if(@selection_locked, do: false, else: Map.get(assigns, :selectable, false)), @render_selected_ids, item, Map.get(assigns, :id_field, :id), @myself)}
           >
             <span
               :if={@show_item_numbers}
@@ -188,8 +192,8 @@ defmodule Cinder.Renderers.Grid do
             >
               <input
                 type="checkbox"
-                disabled={@selection_locked or not Selection.item_toggleable?(Map.get(assigns, :selectable, false), Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id))}
-                checked={Selection.item_selected?(Map.get(assigns, :selected_ids, MapSet.new()), item, Map.get(assigns, :id_field, :id))}
+                disabled={@selection_locked or not Selection.item_toggleable?(Map.get(assigns, :selectable, false), @render_selected_ids, item, Map.get(assigns, :id_field, :id))}
+                checked={Selection.item_selected?(@render_selected_ids, item, Map.get(assigns, :id_field, :id))}
                 phx-click="toggle_select"
                 phx-value-id={to_string(Map.get(item, Map.get(assigns, :id_field, :id)))}
                 phx-target={@myself}
@@ -287,6 +291,23 @@ defmodule Cinder.Renderers.Grid do
   # ============================================================================
   # CONTAINER AND ITEM HELPERS
   # ============================================================================
+
+  defp rendered_selected_ids(%{pagination_mode: :infinite} = assigns) do
+    Selection.rendered_selected_ids_from_ids(
+      Map.get(assigns, :selection_mode, :explicit),
+      assigns.selected_ids,
+      Map.get(assigns, :infinite_item_ids, MapSet.new())
+    )
+  end
+
+  defp rendered_selected_ids(assigns) do
+    Selection.rendered_selected_ids(
+      Map.get(assigns, :selection_mode, :explicit),
+      assigns.selected_ids,
+      assigns.data,
+      assigns.id_field
+    )
+  end
 
   # Explicit container_class override takes precedence
   defp get_container_class(custom_class, _grid_columns, _theme) when is_binary(custom_class) do

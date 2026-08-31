@@ -33,12 +33,25 @@ defmodule Cinder.Renderers.BulkActions do
 
   defp render_bulk_actions(assigns) do
     selected_ids = Map.get(assigns, :selected_ids, MapSet.new())
+    selection_mode = Map.get(assigns, :selection_mode, :explicit)
     slots = Map.get(assigns, :bulk_action_slots, [])
+
+    selected_count =
+      case {selection_mode, Map.get(assigns, :total_count)} do
+        {:all_matching, count} when is_integer(count) -> max(count - MapSet.size(selected_ids), 0)
+        {:all_matching, _unknown} -> nil
+        _explicit -> MapSet.size(selected_ids)
+      end
 
     assigns =
       assigns
       |> assign(:selected_ids, selected_ids)
-      |> assign(:selected_count, MapSet.size(selected_ids))
+      |> assign(:selection_mode, selection_mode)
+      |> assign(
+        :selection_active,
+        selection_mode == :all_matching or MapSet.size(selected_ids) > 0
+      )
+      |> assign(:selected_count, selected_count)
       |> assign(:slots, slots)
 
     ~H"""
@@ -55,6 +68,7 @@ defmodule Cinder.Renderers.BulkActions do
               label={slot[:label]}
               variant={slot[:variant] || :primary}
               selected_count={@selected_count}
+              selection_active={@selection_active}
             />
           <% else %>
             {render_slot([slot], action_context(assigns, slot, index))}
@@ -69,7 +83,7 @@ defmodule Cinder.Renderers.BulkActions do
   end
 
   defp themed_button(assigns) do
-    disabled = assigns.selected_count == 0
+    disabled = not assigns.selection_active
     label = interpolate_text(assigns.label, assigns.selected_count)
 
     button_class =
@@ -120,6 +134,7 @@ defmodule Cinder.Renderers.BulkActions do
     %{
       selected_ids: assigns.selected_ids,
       selected_count: assigns.selected_count,
+      selection_mode: assigns.selection_mode,
       prepare:
         if(slot[:confirmation] == :slot,
           do: action_click(slot, index, assigns.myself)
@@ -130,14 +145,16 @@ defmodule Cinder.Renderers.BulkActions do
   defp confirmation_context(assigns) do
     confirmation = Map.get(assigns, :bulk_action_confirmation)
 
-    {index, selected_ids} =
-      case confirmation do
-        %{index: index, selected_ids: selected_ids} ->
-          {index, selected_ids}
+    index = confirmation && confirmation.index
+    selected_ids = Map.get(confirmation || %{}, :selected_ids, assigns.selected_ids)
+    selection_mode = Map.get(confirmation || %{}, :selection_mode, assigns.selection_mode)
 
-        nil ->
-          {nil, assigns.selected_ids}
-      end
+    selected_count =
+      Map.get_lazy(confirmation || %{}, :selected_count, fn ->
+        if selection_mode == :explicit,
+          do: MapSet.size(selected_ids),
+          else: assigns.selected_count
+      end)
 
     slot = index && Enum.at(assigns.slots, index)
     prepared? = confirmation && Map.has_key?(confirmation, :data)
@@ -146,7 +163,8 @@ defmodule Cinder.Renderers.BulkActions do
       active?: not is_nil(confirmation),
       ready?: !!prepared?,
       selected_ids: selected_ids,
-      selected_count: MapSet.size(selected_ids),
+      selected_count: selected_count,
+      selection_mode: selection_mode,
       action: slot && slot[:action],
       data: confirmation && Map.get(confirmation, :data),
       error: confirmation && Map.get(confirmation, :error),
@@ -161,6 +179,6 @@ defmodule Cinder.Renderers.BulkActions do
   defp variant_class(_theme, _), do: nil
 
   defp interpolate_text(message, count) do
-    String.replace(message, "{count}", to_string(count))
+    String.replace(message, "{count}", if(is_integer(count), do: to_string(count), else: "all"))
   end
 end

@@ -354,6 +354,7 @@ defmodule Cinder.BulkActionConfirmationTest do
       __changed__: %{},
       id: "test-collection",
       selected_ids: @context.selected_ids,
+      selection_mode: :explicit,
       id_field: :id,
       actor: nil,
       tenant: nil,
@@ -402,7 +403,14 @@ defmodule Cinder.BulkActionConfirmationTest do
     confirmation = %{
       index: 0,
       attempt: attempt,
+      selection: %{
+        mode: :explicit,
+        selected_ids: @context.selected_ids,
+        count: @context.selected_count
+      },
       selected_ids: @context.selected_ids,
+      selected_count: @context.selected_count,
+      selection_mode: :explicit,
       data: data
     }
 

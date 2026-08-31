@@ -664,30 +664,29 @@ effect.
 
 Every selectable table, grid, and list renders a select-all control. It selects
 every selectable record matched by the collection's current query, filters, and
-search—not only the rendered page. The lookup runs asynchronously and uses the
-same actor, tenant, scope, action, and query options as the collection.
+search—not only the rendered page.
 
-For `selectable={true}`, Cinder derives an ID-only query from that complete
-filtered scope: display loads and result sorting are removed, and IDs are read
-in bounded batches. A predicate such as `selectable={&(&1.status == :active)}`
-still needs the action's row data to evaluate the function, but Cinder also
-consumes those records in bounded batches instead of loading the entire result
-set at once.
+For `selectable={true}`, Cinder records this as an `:all_matching` selection
+without fetching or retaining every matching ID. The existing `selected_ids`
+`MapSet` changes meaning in this mode: it contains only rows individually
+deselected afterward. Bulk actions receive the collection's trusted,
+server-built filtered query with those IDs excluded, so they operate on the
+current database state when executed.
 
-Infinite collections retain the complete selected-ID set on the server but
-synchronize only its intersection with the bounded browser window. The browser
-patch therefore stays proportional to `window_size`, not the complete filtered
-selection.
+Infinite collections synchronize only the selected state of IDs in the bounded
+browser window. The browser patch therefore stays proportional to `window_size`,
+not the complete filtered selection.
 
-Selected IDs are stored in a `MapSet`, preventing duplicates and allowing bulk
-actions to operate on the complete filtered selection. Pagination and sorting
-preserve the selection. Changing the query, filters, or search invalidates the
-cached select-all scope so the next click evaluates the new result set.
+An arbitrary predicate such as `selectable={&(&1.status == :active)}` cannot be
+translated safely into an Ash query. Cinder therefore keeps the existing
+bounded-stream fallback for that form and materializes only the IDs accepted by
+the predicate. Use a filtered Ash read action together with `selectable={true}`
+when query-wide bulk performance matters.
 
-Before a complete filtered scope has been loaded, the checkbox reflects the
-currently rendered page. After select-all completes, unchecked, indeterminate,
-and checked describe the complete filtered scope. While either collection data
-or the select-all query is loading, the control is disabled.
+Pagination and sorting preserve selection. Changing the query, filters, or
+search clears an `:all_matching` selection because its scope changed. The
+select-all checkbox is checked while the whole query is selected and
+indeterminate when individual IDs have been excluded.
 
 The control inherits `select_all_container_class`, `selection_checkbox_class`,
 and `selection_indeterminate_class` from the active Cinder theme.
@@ -914,7 +913,8 @@ You can also track selection state in your parent LiveView. This is not necessar
 
 ```elixir
 def handle_info({:selection_changed, payload}, socket) do
-  # payload contains: %{selected_ids, selected_count, component_id, action}
+  # payload contains:
+  # %{selection_mode, selected_ids, selected_count, component_id, action}
   # action is one of: :toggle, :select_all, :clear, :remove, :deselect
   {:noreply, assign(socket, :selected_count, payload.selected_count)}
 end
@@ -935,7 +935,8 @@ The bulk action slot receives selection context:
 Available in `selection`:
 
 - `selected_count` - Number of selected items
-- `selected_ids` - MapSet of selected record IDs
+- `selection_mode` - `:explicit` or `:all_matching`
+- `selected_ids` - Selected IDs in `:explicit` mode; individually deselected IDs in `:all_matching` mode
 
 ### Click-to-Select
 

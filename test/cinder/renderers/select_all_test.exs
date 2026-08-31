@@ -52,6 +52,48 @@ defmodule Cinder.Renderers.SelectAllTest do
     assert html =~ "Select all visible items"
   end
 
+  test "query mode is checked for all-matching selection without selected IDs" do
+    html =
+      render_component(&SelectAll.render/1,
+        data: [%{id: "product-1"}],
+        id_field: :id,
+        loading: false,
+        myself: nil,
+        selectable: true,
+        selected_ids: MapSet.new(),
+        selection_mode: :all_matching,
+        theme: %{
+          select_all_container_class: "select-all",
+          selection_checkbox_class: "checkbox",
+          selection_indeterminate_class: "indeterminate"
+        }
+      )
+
+    assert html =~ ~s(data-selection-state="all")
+    assert html =~ ~s(aria-checked="true")
+  end
+
+  test "query mode is indeterminate when all-matching has exclusions" do
+    html =
+      render_component(&SelectAll.render/1,
+        data: [%{id: "product-1"}],
+        id_field: :id,
+        loading: false,
+        myself: nil,
+        selectable: true,
+        selected_ids: MapSet.new(["product-1"]),
+        selection_mode: :all_matching,
+        theme: %{
+          select_all_container_class: "select-all",
+          selection_checkbox_class: "checkbox",
+          selection_indeterminate_class: "indeterminate"
+        }
+      )
+
+    assert html =~ ~s(data-selection-state="some")
+    assert html =~ ~s(aria-checked="mixed")
+  end
+
   test "page mode ignores a cached query scope when deriving checkbox state" do
     html =
       render_component(&SelectAll.render/1,

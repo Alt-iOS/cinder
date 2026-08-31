@@ -308,7 +308,7 @@ defmodule Cinder.Collection do
   attr(:on_selection_change, :any,
     default: nil,
     doc:
-      "Event name (atom or string) sent to parent when selection changes. Parent receives {event_name, %{selected_ids: MapSet.t(), selected_count: integer(), component_id: string(), action: atom()}}."
+      "Event name (atom or string) sent to the parent when selection changes. The payload includes `selection_mode` (`:explicit` or `:all_matching`), `selected_ids`, `selected_count`, `component_id`, and `action`. In `:all_matching` mode, `selected_ids` contains the IDs individually deselected from the matching query."
   )
 
   slot :col do
