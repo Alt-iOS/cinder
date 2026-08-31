@@ -99,16 +99,17 @@ defmodule Cinder.Renderers.List do
         myself={@myself}
       />
 
-      <div :if={Selection.enabled?(@selectable)} class="mb-3">
+      <div :if={Selection.enabled?(@selectable) and Map.get(assigns, :select_all, :query) != false} class="mb-3">
         <SelectAll.render
           data={@data}
           id_field={@id_field}
-          loading={@loading or Map.get(assigns, :selection_loading, false)}
+          loading={@loading or (Map.get(assigns, :select_all, :query) == :query and Map.get(assigns, :selection_loading, false))}
           label={Map.get(assigns, :select_all_label)}
+          mode={Map.get(assigns, :select_all, :query)}
           myself={@myself}
-          pending={Map.get(assigns, :selection_loading, false)}
-          scope_ids={Map.get(assigns, :selection_scope_ids)}
           page_ids={if @pagination_mode == :infinite, do: @infinite_selectable_ids}
+          pending={Map.get(assigns, :select_all, :query) == :query and Map.get(assigns, :selection_loading, false)}
+          scope_ids={if Map.get(assigns, :select_all, :query) == :query, do: Map.get(assigns, :selection_scope_ids)}
           selectable={@selectable}
           selected_ids={@selected_ids}
           theme={@theme}
