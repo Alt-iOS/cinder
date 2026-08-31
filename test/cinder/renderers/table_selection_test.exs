@@ -72,6 +72,37 @@ defmodule Cinder.Renderers.TableSelectionTest do
                ~r/<label[^>]*class="[^"]*mb-3[^"]*"[^>]*data-key="select_all_container_class"/
     end
 
+    test "supports visible-page select all" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          selectable: true,
+          select_all: :page,
+          select_all_label: "Select all visible items",
+          data: [%{id: "user-1", name: "Alice"}]
+        })
+
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      assert html =~ ~s(phx-click="toggle_select_all_page")
+      refute html =~ ~s(phx-click="toggle_select_all")
+    end
+
+    test "can hide select all without hiding individual selection" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          selectable: true,
+          select_all: false,
+          data: [%{id: "user-1", name: "Alice"}]
+        })
+
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      refute html =~ "toggle_select_all"
+      assert html =~ ~s(phx-click="toggle_select")
+    end
+
     test "uses the complete filtered scope for checked and indeterminate state" do
       assigns =
         base_assigns()

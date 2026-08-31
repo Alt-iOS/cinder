@@ -58,13 +58,15 @@ defmodule Cinder.Renderers.Table do
             <tr class={@theme.header_row_class} data-key="header_row_class">
               <th :if={Selection.enabled?(@selectable)} class={[@theme.th_class, "w-10"]} data-key="th_class">
                 <SelectAll.render
+                  :if={Map.get(assigns, :select_all, :query) != false}
                   data={@data}
                   id_field={@id_field}
-                  loading={@loading or Map.get(assigns, :selection_loading, false)}
+                  loading={@loading or (Map.get(assigns, :select_all, :query) == :query and Map.get(assigns, :selection_loading, false))}
                   label={Map.get(assigns, :select_all_label)}
+                  mode={Map.get(assigns, :select_all, :query)}
                   myself={@myself}
-                  pending={Map.get(assigns, :selection_loading, false)}
-                  scope_ids={Map.get(assigns, :selection_scope_ids)}
+                  pending={Map.get(assigns, :select_all, :query) == :query and Map.get(assigns, :selection_loading, false)}
+                  scope_ids={if Map.get(assigns, :select_all, :query) == :query, do: Map.get(assigns, :selection_scope_ids)}
                   selectable={@selectable}
                   selected_ids={@selected_ids}
                   show_label={false}

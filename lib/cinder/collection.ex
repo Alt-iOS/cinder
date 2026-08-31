@@ -208,7 +208,14 @@ defmodule Cinder.Collection do
 
   attr(:select_all_label, :string,
     default: nil,
-    doc: "Selection toggle label (defaults to translated \"Select all filtered items\")"
+    doc: "Selection toggle label (defaults to a translated label matching `select_all`)"
+  )
+
+  attr(:select_all, :any,
+    default: :query,
+    doc:
+      "Select-all scope: `:query` selects every filtered item, `:page` selects visible items, " <>
+        "and `false` hides the select-all control while preserving individual selection."
   )
 
   attr(:search, :any,
@@ -373,6 +380,8 @@ defmodule Cinder.Collection do
   slot(:error, required: false, doc: "Custom error state content")
 
   def collection(assigns) do
+    select_all = normalize_select_all(assigns[:select_all])
+
     assigns =
       assigns
       |> assign_new(:id, fn -> "cinder-collection" end)
@@ -390,7 +399,7 @@ defmodule Cinder.Collection do
       |> assign(:sort_label, assigns[:sort_label] || dgettext("cinder", "Sort by:"))
       |> assign(
         :select_all_label,
-        assigns[:select_all_label] || dgettext("cinder", "Select all filtered items")
+        assigns[:select_all_label] || default_select_all_label(select_all)
       )
       |> assign(:empty_message, assigns.empty_message || dgettext("cinder", "No results found"))
       |> assign(
@@ -406,6 +415,7 @@ defmodule Cinder.Collection do
       |> assign_new(:grid_columns, fn -> nil end)
       |> assign_new(:pagination, fn -> :offset end)
       |> assign_new(:selectable, fn -> false end)
+      |> assign(:select_all, select_all)
       |> assign_new(:on_selection_change, fn -> nil end)
       |> assign(:sort_mode, normalize_sort_mode(assigns[:sort_mode]))
 
@@ -531,6 +541,7 @@ defmodule Cinder.Collection do
         pagination_mode={@pagination_mode}
         id_field={@id_field}
         selectable={@selectable}
+        select_all={@select_all}
         on_selection_change={@on_selection_change}
         on_query_change={@on_query_change}
         bulk_action_slots={@bulk_action_slots}
@@ -539,6 +550,16 @@ defmodule Cinder.Collection do
     </div>
     """
   end
+
+  defp normalize_select_all(mode) when mode in [:query, :page, false], do: mode
+
+  defp normalize_select_all(mode) do
+    raise ArgumentError,
+          "expected :select_all to be :query, :page, or false, got: #{inspect(mode)}"
+  end
+
+  defp default_select_all_label(:page), do: dgettext("cinder", "Select all visible items")
+  defp default_select_all_label(_mode), do: dgettext("cinder", "Select all filtered items")
 
   # ============================================================================
   # PUBLIC PROCESSING FUNCTIONS

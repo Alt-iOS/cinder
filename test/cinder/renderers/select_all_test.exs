@@ -30,4 +30,46 @@ defmodule Cinder.Renderers.SelectAllTest do
     assert html =~ "Choose every matching row"
     assert html =~ ~s(aria-label="Choose every matching row")
   end
+
+  test "page mode targets the visible-page event and label" do
+    html =
+      render_component(&SelectAll.render/1,
+        data: [%{id: "product-1"}],
+        id_field: :id,
+        loading: false,
+        mode: :page,
+        myself: nil,
+        selectable: true,
+        selected_ids: MapSet.new(),
+        theme: %{
+          select_all_container_class: "select-all",
+          selection_checkbox_class: "checkbox",
+          selection_indeterminate_class: "indeterminate"
+        }
+      )
+
+    assert html =~ ~s(phx-click="toggle_select_all_page")
+    assert html =~ "Select all visible items"
+  end
+
+  test "page mode ignores a cached query scope when deriving checkbox state" do
+    html =
+      render_component(&SelectAll.render/1,
+        data: [%{id: "product-1"}],
+        id_field: :id,
+        loading: false,
+        mode: :page,
+        myself: nil,
+        scope_ids: MapSet.new(["product-1", "product-2"]),
+        selectable: true,
+        selected_ids: MapSet.new(["product-1"]),
+        theme: %{
+          select_all_container_class: "select-all",
+          selection_checkbox_class: "checkbox",
+          selection_indeterminate_class: "indeterminate"
+        }
+      )
+
+    assert html =~ ~s(data-selection-state="all")
+  end
 end
