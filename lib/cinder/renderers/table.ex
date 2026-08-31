@@ -21,6 +21,8 @@ defmodule Cinder.Renderers.Table do
   Renders the table layout.
   """
   def render(assigns) do
+    assigns = assign(assigns, :selection_locked, Map.get(assigns, :selection_loading, false))
+
     ~H"""
     <div class={[@theme.container_class, "relative"]} data-key="container_class">
       <!-- Filter Controls (including search) -->
@@ -92,14 +94,14 @@ defmodule Cinder.Renderers.Table do
           </thead>
           <tbody class={[@theme.tbody_class, (@loading && "opacity-75" || "")]} data-key="tbody_class">
             <tr :for={item <- @data} :if={not @error}
-                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, @selectable, @selected_ids, item, @id_field, Map.get(@theme, :selected_row_class))}
+                class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, item, @id_field, Map.get(@theme, :selected_row_class))}
                 data-item-id={to_string(Map.get(item, @id_field))}
                 data-key="row_class"
-                phx-click={selection_click_action(@row_click, @selectable, @selected_ids, item, @id_field, @myself)}>
+                phx-click={selection_click_action(@row_click, if(@selection_locked, do: false, else: @selectable), @selected_ids, item, @id_field, @myself)}>
               <td :if={Selection.enabled?(@selectable)} class={[@theme.td_class, "w-10"]} data-key="td_class">
                 <input
                   type="checkbox"
-                  disabled={not Selection.item_toggleable?(@selectable, @selected_ids, item, @id_field)}
+                  disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @selected_ids, item, @id_field)}
                   checked={Selection.item_selected?(@selected_ids, item, @id_field)}
                   phx-click="toggle_select"
                   phx-value-id={to_string(Map.get(item, @id_field))}

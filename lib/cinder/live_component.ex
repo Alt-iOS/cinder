@@ -356,6 +356,10 @@ defmodule Cinder.LiveComponent do
   # ============================================================================
 
   @impl true
+  def handle_event("toggle_select", _params, %{assigns: %{selection_loading: true}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("toggle_select", %{"id" => id}, socket) do
     selected_ids = socket.assigns.selected_ids
 

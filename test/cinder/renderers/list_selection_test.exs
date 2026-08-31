@@ -97,6 +97,20 @@ defmodule Cinder.Renderers.ListSelectionTest do
       assert html =~ ~s(phx-value-id="item-1")
     end
 
+    test "disables item selection while query-wide select all is loading" do
+      assigns =
+        base_assigns()
+        |> Map.merge(%{
+          selectable: true,
+          selection_loading: true,
+          data: [%{id: "item-1", name: "Item 1"}]
+        })
+
+      html = render_component(&ListRenderer.render/1, assigns)
+
+      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select"/
+    end
+
     test "does not render selection elements when selectable=false" do
       assigns =
         base_assigns()
