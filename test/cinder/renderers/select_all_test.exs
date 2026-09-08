@@ -5,6 +5,24 @@ defmodule Cinder.Renderers.SelectAllTest do
 
   alias Cinder.Renderers.SelectAll
 
+  test "query mode stays available when the current page has no eligible rows" do
+    assigns = %{
+      data: [%{id: "inactive", active?: false}],
+      id_field: :id,
+      loading: false,
+      myself: nil,
+      selectable: & &1.active?,
+      selected_ids: MapSet.new(),
+      theme: Cinder.Theme.default()
+    }
+
+    query_html = render_component(&SelectAll.render/1, Map.put(assigns, :mode, :query))
+    refute query_html =~ ~r/<input[^>]*\sdisabled(?:\s|>)/
+
+    page_html = render_component(&SelectAll.render/1, Map.put(assigns, :mode, :page))
+    assert page_html =~ ~r/<input[^>]*\sdisabled(?:\s|>)/
+  end
+
   test "keeps the native checked state and disables the control while select-all is pending" do
     html =
       render_component(&SelectAll.render/1,

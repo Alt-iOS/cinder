@@ -31,7 +31,10 @@ defmodule Cinder.Renderers.SelectAll do
 
     assigns =
       assigns
-      |> assign(:disabled, assigns.loading or MapSet.size(selection_ids) == 0)
+      |> assign(
+        :disabled,
+        assigns.loading or (assigns.mode == :page and MapSet.size(selection_ids) == 0)
+      )
       |> assign(
         :event,
         if(assigns.mode == :page, do: "toggle_select_all_page", else: "toggle_select_all")

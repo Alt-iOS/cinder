@@ -157,14 +157,14 @@ defmodule Cinder.Renderers.Grid do
             >
               <input
                 type="checkbox"
-                disabled={@selection_locked or not payload.selectable?}
+                disabled={@selection_locked or not Selection.item_toggleable?(@selectable, @render_selected_ids, payload.record, @id_field)}
                 checked={Selection.item_selected?(@render_selected_ids, payload.record, @id_field)}
                 phx-click="toggle_select"
                 phx-value-id={payload.id}
                 phx-target={@myself}
                 class={@theme.selection_checkbox_class}
                 data-cinder-selection-checkbox
-                data-cinder-selection-disabled={not payload.selectable?}
+                data-cinder-selection-disabled={not Selection.item_toggleable?(@selectable, @render_selected_ids, payload.record, @id_field)}
                 data-key="selection_checkbox_class"
               />
             </div>
@@ -281,6 +281,7 @@ defmodule Cinder.Renderers.Grid do
         loading={@loading}
         error={@error}
         infinite_load={Map.get(assigns, :infinite_load, :automatic)}
+        overscan={Map.get(assigns, :overscan, 1)}
         load_more_label={Map.get(assigns, :load_more_label)}
         id={@id}
       />

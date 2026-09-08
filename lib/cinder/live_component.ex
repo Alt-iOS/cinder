@@ -92,7 +92,12 @@ defmodule Cinder.LiveComponent do
       end
 
     selected_ids = socket.assigns[:selected_ids] || MapSet.new()
-    updated_selected_ids = MapSet.difference(selected_ids, id_set)
+
+    updated_selected_ids =
+      case socket.assigns[:selection_mode] do
+        :all_matching -> MapSet.union(selected_ids, id_set)
+        _ -> MapSet.difference(selected_ids, id_set)
+      end
 
     updated_selection_scope_ids =
       case socket.assigns[:selection_scope_ids] do
@@ -556,6 +561,8 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_filter", %{"key" => "search"}, socket) do
+    previous_scope = selection_scope_state(socket.assigns)
+
     socket =
       socket
       |> assign(:search_term, "")
@@ -564,6 +571,7 @@ defmodule Cinder.LiveComponent do
       |> assign(:before_keyset, nil)
       |> assign(:infinite_append?, false)
       |> mark_infinite_reset()
+      |> maybe_invalidate_selection_scope(previous_scope)
       |> load_data()
       |> notify_state_change()
 
@@ -572,6 +580,8 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_filter", %{"key" => key}, socket) do
+    previous_scope = selection_scope_state(socket.assigns)
+
     new_filters = Cinder.FilterManager.clear_filter(socket.assigns.filters, key)
 
     # Also clear the autocomplete search term for this field
@@ -588,6 +598,7 @@ defmodule Cinder.LiveComponent do
       |> assign(:before_keyset, nil)
       |> assign(:infinite_append?, false)
       |> mark_infinite_reset()
+      |> maybe_invalidate_selection_scope(previous_scope)
       |> load_data()
 
     socket = notify_state_change(socket, new_filters)
@@ -650,6 +661,8 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_all_filters", _params, socket) do
+    previous_scope = selection_scope_state(socket.assigns)
+
     new_filters = Cinder.FilterManager.clear_all_filters(socket.assigns.filters)
 
     socket =
@@ -660,6 +673,7 @@ defmodule Cinder.LiveComponent do
       |> assign(:before_keyset, nil)
       |> assign(:infinite_append?, false)
       |> mark_infinite_reset()
+      |> maybe_invalidate_selection_scope(previous_scope)
       |> load_data()
       |> notify_state_change()
 
@@ -1543,9 +1557,12 @@ defmodule Cinder.LiveComponent do
   end
 
   defp update_infinite_boundaries(socket, page, :reset, _window_pruned?) do
+    before? = not is_nil(socket.assigns.before_keyset)
+    after? = not is_nil(socket.assigns.after_keyset)
+
     socket
-    |> assign(:infinite_has_previous, false)
-    |> assign(:infinite_has_next, has_more_results?(page))
+    |> assign(:infinite_has_previous, if(before?, do: has_more_results?(page), else: after?))
+    |> assign(:infinite_has_next, before? or has_more_results?(page))
   end
 
   defp update_infinite_boundaries(socket, page, :prepend, window_pruned?) do
@@ -2198,7 +2215,7 @@ defmodule Cinder.LiveComponent do
 
   defp invalidate_selection_scope(socket) do
     if socket.assigns.selection_mode == :all_matching do
-      clear_selection_state(socket)
+      socket |> clear_selection_state() |> notify_selection_change(:clear)
     else
       assign(socket, selection_scope_ids: nil, selection_attempt: nil, selection_loading: false)
     end
