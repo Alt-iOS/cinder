@@ -273,12 +273,15 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_filter", %{"key" => "search"}, socket) do
+    previous_scope = selection_scope_state(socket.assigns)
+
     socket =
       socket
       |> assign(:search_term, "")
       |> assign(:current_page, 1)
       |> assign(:after_keyset, nil)
       |> assign(:before_keyset, nil)
+      |> maybe_invalidate_selection_scope(previous_scope)
       |> load_data()
       |> notify_state_change()
 
@@ -287,6 +290,8 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_filter", %{"key" => key}, socket) do
+    previous_scope = selection_scope_state(socket.assigns)
+
     new_filters = Cinder.FilterManager.clear_filter(socket.assigns.filters, key)
 
     # Also clear the autocomplete search term for this field
@@ -301,6 +306,7 @@ defmodule Cinder.LiveComponent do
       |> assign(:current_page, 1)
       |> assign(:after_keyset, nil)
       |> assign(:before_keyset, nil)
+      |> maybe_invalidate_selection_scope(previous_scope)
       |> load_data()
 
     socket = notify_state_change(socket, new_filters)
@@ -354,6 +360,8 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_all_filters", _params, socket) do
+    previous_scope = selection_scope_state(socket.assigns)
+
     new_filters = Cinder.FilterManager.clear_all_filters(socket.assigns.filters)
 
     socket =
@@ -362,6 +370,7 @@ defmodule Cinder.LiveComponent do
       |> assign(:current_page, 1)
       |> assign(:after_keyset, nil)
       |> assign(:before_keyset, nil)
+      |> maybe_invalidate_selection_scope(previous_scope)
       |> load_data()
       |> notify_state_change()
 
@@ -1260,7 +1269,7 @@ defmodule Cinder.LiveComponent do
 
   defp invalidate_selection_scope(socket) do
     if socket.assigns.selection_mode == :all_matching do
-      clear_selection_state(socket)
+      socket |> clear_selection_state() |> notify_selection_change(:clear)
     else
       assign(socket, selection_scope_ids: nil, selection_attempt: nil, selection_loading: false)
     end
