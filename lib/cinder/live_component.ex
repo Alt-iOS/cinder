@@ -37,6 +37,7 @@ defmodule Cinder.LiveComponent do
       |> maybe_reset_infinite_pagination()
       |> ensure_infinite_stream()
       |> assign_column_definitions()
+      |> invalidate_count()
       |> load_data()
 
     {:ok, socket}
@@ -481,7 +482,7 @@ defmodule Cinder.LiveComponent do
         socket
       end
 
-    {:noreply, load_data(socket)}
+    {:noreply, socket |> invalidate_count() |> load_data()}
   end
 
   @impl true
@@ -692,6 +693,7 @@ defmodule Cinder.LiveComponent do
       |> assign(:selected_ids, MapSet.new())
       |> notify_selection_change(:clear)
       |> maybe_reset_infinite_pagination()
+      |> invalidate_count()
       |> load_data()
 
     if event_name = slot[:on_success] do
@@ -1614,6 +1616,10 @@ defmodule Cinder.LiveComponent do
         end)
       end
     end)
+  end
+
+  defp invalidate_count(socket) do
+    assign(socket, total_count: nil, count_query_state: nil, count_attempt: nil)
   end
 
   defp prepare_count_for_load(socket) do
