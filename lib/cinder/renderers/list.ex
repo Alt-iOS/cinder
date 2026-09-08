@@ -126,7 +126,7 @@ defmodule Cinder.Renderers.List do
             >
               <input
                 type="checkbox"
-                disabled={not payload.selectable?}
+                disabled={not Selection.item_toggleable?(@selectable, @selected_ids, payload.record, @id_field)}
                 checked={Selection.item_selected?(@selected_ids, payload.record, @id_field)}
                 phx-click="toggle_select"
                 phx-value-id={payload.id}

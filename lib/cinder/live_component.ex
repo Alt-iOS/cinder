@@ -1059,9 +1059,12 @@ defmodule Cinder.LiveComponent do
   end
 
   defp update_infinite_boundaries(socket, page, :reset, _window_pruned?) do
+    before? = not is_nil(socket.assigns.before_keyset)
+    after? = not is_nil(socket.assigns.after_keyset)
+
     socket
-    |> assign(:infinite_has_previous, false)
-    |> assign(:infinite_has_next, has_more_results?(page))
+    |> assign(:infinite_has_previous, if(before?, do: has_more_results?(page), else: after?))
+    |> assign(:infinite_has_next, before? or has_more_results?(page))
   end
 
   defp update_infinite_boundaries(socket, page, :prepend, window_pruned?) do
