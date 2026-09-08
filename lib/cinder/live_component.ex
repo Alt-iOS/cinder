@@ -73,7 +73,12 @@ defmodule Cinder.LiveComponent do
       end)
 
     selected_ids = socket.assigns[:selected_ids] || MapSet.new()
-    updated_selected_ids = MapSet.difference(selected_ids, id_set)
+
+    updated_selected_ids =
+      case socket.assigns[:selection_mode] do
+        :all_matching -> MapSet.union(selected_ids, id_set)
+        _ -> MapSet.difference(selected_ids, id_set)
+      end
 
     socket =
       socket
