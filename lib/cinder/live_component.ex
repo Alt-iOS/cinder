@@ -42,6 +42,7 @@ defmodule Cinder.LiveComponent do
       |> prepare_refresh()
       |> ensure_infinite_stream()
       |> assign_column_definitions()
+      |> invalidate_count()
       |> load_data()
 
     {:ok, socket}
@@ -109,6 +110,23 @@ defmodule Cinder.LiveComponent do
         socket
       else
         notify_selection_change(socket, :remove)
+      end
+
+    {:ok, socket}
+  end
+
+  def update(%{__deselect_items__: ids}, %{assigns: %{selection_mode: :all_matching}} = socket)
+      when is_list(ids) do
+    id_set = MapSet.new(ids, &to_string/1)
+    selected_ids = socket.assigns[:selected_ids] || MapSet.new()
+    updated_selected_ids = MapSet.union(selected_ids, id_set)
+    socket = assign(socket, :selected_ids, updated_selected_ids)
+
+    socket =
+      if MapSet.equal?(selected_ids, updated_selected_ids) do
+        socket
+      else
+        notify_selection_change(socket, :deselect)
       end
 
     {:ok, socket}
@@ -627,7 +645,7 @@ defmodule Cinder.LiveComponent do
         socket
       end
 
-    {:noreply, load_data(socket)}
+    {:noreply, socket |> invalidate_count() |> load_data()}
   end
 
   @impl true
@@ -992,6 +1010,8 @@ defmodule Cinder.LiveComponent do
       |> assign(:selected_ids, remaining_ids)
       |> clear_executed_selection(selection.mode)
       |> notify_selection_change(:clear)
+      |> maybe_reset_infinite_pagination()
+      |> invalidate_count()
       |> load_data()
 
     if event_name = slot[:on_success] do
@@ -2190,6 +2210,10 @@ defmodule Cinder.LiveComponent do
     else
       invalidate_selection_scope(socket)
     end
+  end
+
+  defp invalidate_count(socket) do
+    assign(socket, total_count: nil, count_query_state: nil, count_attempt: nil)
   end
 
   defp prepare_count_for_load(socket) do
