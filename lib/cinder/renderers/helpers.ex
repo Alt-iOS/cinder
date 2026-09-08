@@ -80,6 +80,43 @@ defmodule Cinder.Renderers.Helpers do
     |> Phoenix.Component.assign_new(:count_mode, fn -> :sync end)
   end
 
+  @doc false
+  def prepare_renderer(assigns, layout) do
+    selected_class_key = if layout == :table, do: :selected_row_class, else: :selected_item_class
+
+    assigns
+    |> assign_infinite_defaults()
+    |> Phoenix.Component.assign(:layout, layout)
+    |> Phoenix.Component.assign_new(:show_sort, fn -> false end)
+    |> Phoenix.Component.assign_new(:has_item_slot, fn -> true end)
+    |> Phoenix.Component.assign_new(:show_item_numbers, fn -> false end)
+    |> Phoenix.Component.assign_new(:current_page, fn -> 1 end)
+    |> Phoenix.Component.assign(:selection_locked, Map.get(assigns, :selection_loading, false))
+    |> Phoenix.Component.assign(
+      :show_loading_state,
+      assigns.loading and not Map.get(assigns, :silent_refresh, false)
+    )
+    |> Phoenix.Component.assign(:render_selected_ids, rendered_selected_ids(assigns))
+    |> Phoenix.Component.assign(:selected_class, Map.get(assigns.theme, selected_class_key))
+  end
+
+  defp rendered_selected_ids(%{pagination_mode: :infinite} = assigns) do
+    Selection.rendered_selected_ids_from_ids(
+      Map.get(assigns, :selection_mode, :explicit),
+      assigns.selected_ids,
+      Map.get(assigns, :infinite_item_ids, MapSet.new())
+    )
+  end
+
+  defp rendered_selected_ids(assigns) do
+    Selection.rendered_selected_ids(
+      Map.get(assigns, :selection_mode, :explicit),
+      assigns.selected_ids,
+      assigns.data,
+      assigns.id_field
+    )
+  end
+
   @doc """
   Checks whether a slot assign contains any provided slot content.
   """
