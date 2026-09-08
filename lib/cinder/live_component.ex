@@ -691,6 +691,7 @@ defmodule Cinder.LiveComponent do
       socket
       |> assign(:selected_ids, MapSet.new())
       |> notify_selection_change(:clear)
+      |> maybe_reset_infinite_pagination()
       |> load_data()
 
     if event_name = slot[:on_success] do
