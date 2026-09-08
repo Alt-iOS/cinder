@@ -196,7 +196,8 @@ defmodule Cinder.Collection do
 
   attr(:overscan, :integer,
     default: 1,
-    doc: "Number of additional page_size batches prefetched for infinite pagination."
+    doc:
+      "Number of additional page_size batches prefetched in infinite pagination; automatic loading also triggers this many extra viewport-heights ahead."
   )
 
   attr(:infinite_load, :atom,

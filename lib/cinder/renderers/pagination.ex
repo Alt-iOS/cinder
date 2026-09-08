@@ -300,6 +300,7 @@ defmodule Cinder.Renderers.Pagination do
       |> assign(:has_next, has_next)
       |> assign(:loading, Map.get(assigns, :loading, false))
       |> assign(:infinite_load, Map.get(assigns, :infinite_load, :automatic))
+      |> assign(:overscan, Map.get(assigns, :overscan, 1))
       |> assign(
         :load_more_label,
         Map.get(assigns, :load_more_label) || dgettext("cinder", "Load more")
@@ -315,7 +316,10 @@ defmodule Cinder.Renderers.Pagination do
       <div class={@theme.pagination_container_class} data-key="pagination_container_class">
         <div
           :if={is_integer(@total_count)}
-          class={@theme.pagination_info_class}
+          class={[
+            @theme.pagination_info_class,
+            @infinite_load == :automatic && "h-px overflow-hidden p-0"
+          ]}
           data-key="pagination_info_class"
           data-pagination-state="counted"
         >
@@ -350,12 +354,13 @@ defmodule Cinder.Renderers.Pagination do
           data-key="pagination_info_class"
           data-pagination-state="ready"
           data-infinite-prefetch-distance={if @infinite_load == :automatic, do: "viewport"}
+          data-infinite-overscan={if @infinite_load == :automatic, do: @overscan}
           phx-hook={if @infinite_load == :automatic, do: "CinderInfiniteSentinel"}
           phx-target={@myself}
         >
           <button
             type="button"
-            class={@theme.pagination_button_class}
+            class={[@theme.pagination_button_class, @infinite_load == :automatic && "sr-only"]}
             phx-click="load_more"
             phx-target={@myself}
           >

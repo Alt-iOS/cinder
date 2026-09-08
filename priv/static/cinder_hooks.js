@@ -1,3 +1,24 @@
+const scrollContainer = (element) => {
+  for (let candidate = element; candidate; candidate = candidate.parentElement) {
+    const { overflowY } = window.getComputedStyle(candidate);
+
+    if (/(auto|scroll|overlay)/.test(overflowY) && candidate.scrollHeight > candidate.clientHeight) {
+      return candidate;
+    }
+  }
+
+  return document.scrollingElement;
+};
+
+const viewportBounds = (scroller) => {
+  if (scroller === document.scrollingElement) {
+    return { top: 0, bottom: window.innerHeight };
+  }
+
+  const bounds = scroller.getBoundingClientRect();
+  return { top: bounds.top, bottom: bounds.bottom };
+};
+
 const CinderInfiniteStream = {
   mounted() {
     this.appliedSelectionState = null;
@@ -5,8 +26,8 @@ const CinderInfiniteStream = {
   },
 
   beforeUpdate() {
-    const scroller = this.scrollContainer(this.el);
-    const viewport = this.viewportBounds(scroller);
+    const scroller = scrollContainer(this.el);
+    const viewport = viewportBounds(scroller);
 
     this.viewportAnchors = Array.from(this.el.querySelectorAll("[data-item-id]"))
       .map((item) => {
@@ -65,33 +86,13 @@ const CinderInfiniteStream = {
 
     if (!anchor) return;
 
-    const viewport = this.viewportBounds(scroller);
+    const viewport = viewportBounds(scroller);
     const currentOffset = anchor.item.getBoundingClientRect().top - viewport.top;
     const adjustment = currentOffset - anchor.position.offset;
 
     if (Math.abs(adjustment) > 0.5) scroller.scrollTop += adjustment;
   },
 
-  scrollContainer(stream) {
-    for (let element = stream; element; element = element.parentElement) {
-      const { overflowY } = window.getComputedStyle(element);
-
-      if (/(auto|scroll|overlay)/.test(overflowY) && element.scrollHeight > element.clientHeight) {
-        return element;
-      }
-    }
-
-    return document.scrollingElement;
-  },
-
-  viewportBounds(scroller) {
-    if (scroller === document.scrollingElement) {
-      return { top: 0, bottom: window.innerHeight };
-    }
-
-    const bounds = scroller.getBoundingClientRect();
-    return { top: bounds.top, bottom: bounds.bottom };
-  },
 };
 
 const CinderInfiniteSentinel = {
@@ -117,10 +118,15 @@ const CinderInfiniteSentinel = {
 
     this.observer?.disconnect();
 
-    // Start the request one viewport before the sentinel becomes visible. The
-    // prefetched DOM window can then absorb server/network latency without the
-    // user reaching the end of the rendered rows first.
-    const prefetchDistance = Math.max(window.innerHeight, 400);
+    const stream = this.el.closest("[data-cinder-infinite-root]");
+    const scroller = scrollContainer(stream || this.el);
+    const viewport = viewportBounds(scroller);
+    const overscan = Math.max(Number.parseInt(this.el.dataset.infiniteOverscan || "1", 10), 0);
+
+    // Overscan already controls how many extra batches Cinder keeps ready. Use
+    // the same setting to move the sentinel trigger farther ahead without
+    // introducing a second prefetch configuration.
+    const prefetchDistance = Math.max(viewport.bottom - viewport.top, 400) * (1 + overscan);
 
     this.observer = new IntersectionObserver(
       async ([entry]) => {
@@ -144,7 +150,7 @@ const CinderInfiniteSentinel = {
         }
       },
       {
-        root: null,
+        root: scroller === document.scrollingElement ? null : scroller,
         rootMargin: `0px 0px ${prefetchDistance}px 0px`,
         threshold: 0,
       },

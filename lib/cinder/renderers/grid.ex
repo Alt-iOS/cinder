@@ -251,6 +251,7 @@ defmodule Cinder.Renderers.Grid do
         loading={@loading}
         error={@error}
         infinite_load={Map.get(assigns, :infinite_load, :automatic)}
+        overscan={Map.get(assigns, :overscan, 1)}
         load_more_label={Map.get(assigns, :load_more_label)}
         id={@id}
       />

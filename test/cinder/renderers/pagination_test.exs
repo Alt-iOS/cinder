@@ -151,12 +151,38 @@ defmodule Cinder.Renderers.PaginationTest do
       assert html =~ ~s(data-pagination-mode="infinite")
       assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
       assert html =~ ~s(data-infinite-prefetch-distance="viewport")
+      assert html =~ ~s(data-infinite-overscan="1")
+      assert html =~ "h-px overflow-hidden p-0"
+      assert html =~ "sr-only"
       assert html =~ "100 items"
       refute html =~ ~s(phx-viewport-bottom="load_more")
       refute html =~ ~s(id="items-page-size-options")
       refute html =~ "showing 1-10 of 100"
       assert html =~ ~s(class="pagination-info")
       assert html =~ ~s(data-key="pagination_info_class")
+    end
+
+    test "passes configured overscan to the automatic sentinel and keeps manual controls visible" do
+      automatic =
+        base_assigns("automatic-items")
+        |> Map.merge(%{
+          pagination_mode: :infinite,
+          loaded_count: 10,
+          loading: false,
+          error: false,
+          overscan: 3
+        })
+
+      assert render_component(&Pagination.render/1, automatic) =~
+               ~s(data-infinite-overscan="3")
+
+      manual = Map.put(automatic, :infinite_load, :manual)
+      manual_html = render_component(&Pagination.render/1, manual)
+
+      refute manual_html =~ ~s(phx-hook="CinderInfiniteSentinel")
+      refute manual_html =~ "h-px overflow-hidden p-0"
+      refute manual_html =~ "sr-only"
+      assert manual_html =~ "Load more"
     end
 
     test "renders infinite navigation when count is disabled" do
