@@ -191,6 +191,7 @@ msgstr "Digite para pesquisar mais opções..."
 msgid "An error occurred while loading data"
 msgstr "Um erro ocorreu ao carregar os dados"
 
+#: lib/cinder/collection.ex
 #: lib/cinder/renderers/pagination.ex
 #, elixir-autogen, elixir-format
 msgid "Load more"
@@ -221,6 +222,7 @@ msgstr "Página %{current}"
 msgid "You have reached the end of this list"
 msgstr "Você chegou ao fim desta lista"
 
+#: lib/cinder/collection.ex
 #: lib/cinder/renderers/select_all.ex
 #, elixir-autogen, elixir-format
 msgid "Select all filtered items"
@@ -230,3 +232,9 @@ msgstr "Selecionar todos os itens filtrados"
 #, elixir-autogen, elixir-format
 msgid "%{total} items"
 msgstr "%{total} itens"
+
+#: lib/cinder/collection.ex
+#: lib/cinder/renderers/select_all.ex
+#, elixir-autogen, elixir-format
+msgid "Select all visible items"
+msgstr ""
