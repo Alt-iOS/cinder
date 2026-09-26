@@ -89,6 +89,22 @@ defmodule Cinder.Filters.MultiCheckboxesMatchModeTest do
       assert inspect(result_any.filter) == inspect(result_all.filter)
     end
 
+    test "array calculations match by containment like array attributes", %{query: query} do
+      filter_value = %{
+        type: :multi_checkboxes,
+        value: ["tag1", "tag2"],
+        operator: :in,
+        match_mode: :any
+      }
+
+      result = MultiCheckboxes.build_query(query, "tag_labels", filter_value)
+
+      filter_str = inspect(result.filter)
+      assert String.contains?(filter_str, ~s("tag1" in tag_labels))
+      assert String.contains?(filter_str, ~s("tag2" in tag_labels))
+      assert String.contains?(filter_str, "or")
+    end
+
     test "missing match_mode defaults to ANY behavior", %{query: query} do
       old_format = %{type: :multi_checkboxes, value: ["tag1", "tag2"], operator: :in}
 

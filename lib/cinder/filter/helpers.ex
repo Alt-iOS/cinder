@@ -585,11 +585,17 @@ defmodule Cinder.Filter.Helpers do
     end
   end
 
-  # Helper function to get field type information
+  # Helper function to get field type information. Aggregates and calculations carry their type
+  # too, so an array-typed calculation is filtered by containment like an array attribute.
   defp get_field_type(resource, field_atom) do
-    case Ash.Resource.Info.attribute(resource, field_atom) do
-      %{type: field_type} -> field_type
-      nil -> :unknown
+    field =
+      Ash.Resource.Info.attribute(resource, field_atom) ||
+        Ash.Resource.Info.aggregate(resource, field_atom) ||
+        Ash.Resource.Info.calculation(resource, field_atom)
+
+    case field do
+      %{type: field_type} when not is_nil(field_type) -> field_type
+      _ -> :unknown
     end
   end
 

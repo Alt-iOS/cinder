@@ -54,6 +54,10 @@ defmodule TestResourceForInference do
     attribute(:settings, TestSettings)
     attribute(:metadata, :map)
   end
+
+  calculations do
+    calculate(:tag_labels, {:array, :string}, expr(tags))
+  end
 end
 
 defmodule NotAnAshResource do
