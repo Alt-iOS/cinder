@@ -1156,6 +1156,7 @@ defmodule Cinder.LiveComponent do
 
   defp mark_infinite_reset(socket) do
     socket
+    |> clear_stale_items()
     |> assign(:infinite_direction, :reset)
     |> assign(:infinite_pages, [])
     |> assign(:infinite_item_ids, MapSet.new())
@@ -1165,6 +1166,15 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_range_end, 0)
     |> assign(:infinite_has_previous, false)
     |> assign(:infinite_has_next, false)
+  end
+
+  # The rows of a result set that starts over leave with it, so the loading state takes their
+  # place rather than showing below them. A silent refresh shows no loading state, so its rows
+  # stay until the new ones arrive.
+  defp clear_stale_items(socket) do
+    if Map.get(socket.assigns, :silent_refresh, false),
+      do: socket,
+      else: maybe_stream_items(socket, [], reset: true)
   end
 
   defp reset_infinite_pagination(socket) do
