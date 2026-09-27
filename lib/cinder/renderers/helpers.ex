@@ -77,6 +77,7 @@ defmodule Cinder.Renderers.Helpers do
     |> Phoenix.Component.assign_new(:infinite_has_next, fn -> false end)
     |> Phoenix.Component.assign_new(:infinite_selectable_ids, fn -> MapSet.new() end)
     |> Phoenix.Component.assign_new(:total_count, fn -> nil end)
+    |> Phoenix.Component.assign_new(:count_failed?, fn -> false end)
     |> Phoenix.Component.assign_new(:count_mode, fn -> :sync end)
   end
 

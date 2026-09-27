@@ -1654,6 +1654,7 @@ defmodule Cinder.LiveComponent do
 
   defp mark_infinite_reset(socket) do
     socket
+    |> clear_stale_items()
     |> assign(:infinite_direction, :reset)
     |> assign(:infinite_pages, [])
     |> assign(:infinite_item_ids, MapSet.new())
@@ -1663,6 +1664,15 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_range_end, 0)
     |> assign(:infinite_has_previous, false)
     |> assign(:infinite_has_next, false)
+  end
+
+  # The rows of a result set that starts over leave with it, so the loading state takes their
+  # place rather than showing below them. A silent refresh shows no loading state, so its rows
+  # stay until the new ones arrive.
+  defp clear_stale_items(socket) do
+    if Map.get(socket.assigns, :silent_refresh, false),
+      do: socket,
+      else: maybe_stream_items(socket, [], reset: true)
   end
 
   defp reset_infinite_pagination(socket) do
@@ -1773,6 +1783,20 @@ defmodule Cinder.LiveComponent do
         before: Cinder.UrlManager.decode_cursor(Map.get(raw_params, "before"))
       }
 
+      # Infinite URLs carry a cursor, not the ordinal of a batch in the current
+      # window. Our own URL patch must not turn an in-flight/appended batch back
+      # into page one and issue the same read again.
+      same_cursor? =
+        decoded_state.after == socket.assigns.after_keyset and
+          decoded_state.before == socket.assigns.before_keyset
+
+      current_page =
+        cond do
+          socket.assigns.pagination_mode != :infinite -> decoded_state.current_page
+          same_cursor? -> socket.assigns.current_page
+          true -> 1
+        end
+
       final_sort_by =
         cond do
           decoded_state.sort_by != [] ->
@@ -1806,27 +1830,30 @@ defmodule Cinder.LiveComponent do
       updated_socket =
         if socket.assigns.pagination_mode in [:keyset, :infinite] do
           updated_socket
-          |> maybe_assign_cursor(:after_keyset, decoded_state.after)
-          |> maybe_assign_cursor(:before_keyset, decoded_state.before)
+          |> assign(:after_keyset, decoded_state.after)
+          |> assign(:before_keyset, decoded_state.before)
+        else
+          updated_socket
+        end
+
+      updated_socket =
+        if socket.assigns.pagination_mode == :infinite and not same_cursor? do
+          updated_socket
+          |> mark_infinite_reset()
+          |> assign(:infinite_append?, false)
         else
           updated_socket
         end
 
       updated_socket
       |> assign(:filters, decoded_state.filters)
-      |> assign(
-        :current_page,
-        if(socket.assigns.pagination_mode == :infinite, do: 1, else: decoded_state.current_page)
-      )
+      |> assign(:current_page, current_page)
       |> assign(:sort_by, final_sort_by)
       |> assign(:search_term, decoded_state.search_term)
     else
       socket
     end
   end
-
-  defp maybe_assign_cursor(socket, _key, nil), do: socket
-  defp maybe_assign_cursor(socket, key, cursor), do: assign(socket, key, cursor)
 
   # ============================================================================
   # PRIVATE FUNCTIONS - Initialization
@@ -1854,7 +1881,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:page_size, selected_page_size)
     |> assign(:page_size_config, updated_page_size_config)
     |> assign(:current_page, assigns[:current_page] || 1)
-    |> assign(:loading, false)
+    |> assign(:loading, Map.get(assigns, :loading, false))
     |> assign(:silent_refresh, assigns[:silent_refresh] || false)
     |> assign(:silent_refresh_state, assigns[:silent_refresh_state])
     |> assign(:error, assigns[:error] || false)
@@ -1873,6 +1900,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:pagination_mode, pagination_mode)
     |> assign(:count_mode, Map.get(assigns, :count_mode, :sync))
     |> assign_new(:total_count, fn -> nil end)
+    |> assign_new(:count_failed?, fn -> false end)
     |> assign_new(:count_query_state, fn -> nil end)
     |> assign_new(:count_attempt, fn -> nil end)
     |> assign(:window_size, window_size)
@@ -2064,10 +2092,29 @@ defmodule Cinder.LiveComponent do
     reload_requested = socket.assigns[:__reload_requested__] == true
     socket = assign(socket, :__reload_requested__, false)
 
-    if first_load or state_changed or reload_requested do
-      load_data(socket)
-    else
-      socket
+    cond do
+      first_load or reload_requested -> load_data(socket)
+      state_changed -> socket |> start_over(prev, curr) |> load_data()
+      true -> socket
+    end
+  end
+
+  @result_keys ~w(filters sort_by search_term query query_opts actor_id tenant_id scope_id)a
+  @cursor_keys ~w(current_page after_keyset before_keyset)a
+
+  # A new query, filter, search, sort or reader is a different result set, so an infinite
+  # stream starts over instead of keeping the old rows. A cursor arriving in the same update,
+  # such as one restored from the URL, is kept.
+  defp start_over(socket, prev, curr) do
+    cond do
+      not infinite_mode?(socket) or Map.take(prev, @result_keys) == Map.take(curr, @result_keys) ->
+        socket
+
+      Map.take(prev, @cursor_keys) != Map.take(curr, @cursor_keys) ->
+        mark_infinite_reset(socket)
+
+      true ->
+        reset_infinite_pagination(socket)
     end
   end
 
@@ -2230,7 +2277,12 @@ defmodule Cinder.LiveComponent do
   end
 
   defp invalidate_count(socket) do
-    assign(socket, total_count: nil, count_query_state: nil, count_attempt: nil)
+    assign(socket,
+      total_count: nil,
+      count_query_state: nil,
+      count_attempt: nil,
+      count_failed?: false
+    )
   end
 
   defp prepare_count_for_load(socket) do
@@ -2239,7 +2291,12 @@ defmodule Cinder.LiveComponent do
     if Map.get(socket.assigns, :count_query_state) == state do
       socket
     else
-      assign(socket, total_count: nil, count_query_state: state, count_attempt: nil)
+      assign(socket,
+        total_count: nil,
+        count_query_state: state,
+        count_attempt: nil,
+        count_failed?: false
+      )
     end
   end
 
@@ -2275,13 +2332,13 @@ defmodule Cinder.LiveComponent do
 
   defp apply_async_count_result(socket, attempt, {:ok, count})
        when socket.assigns.count_attempt == attempt do
-    assign(socket, total_count: count, count_attempt: nil)
+    assign(socket, total_count: count, count_attempt: nil, count_failed?: false)
   end
 
   defp apply_async_count_result(socket, attempt, {:error, reason})
        when socket.assigns.count_attempt == attempt do
     Logger.warning("Cinder count query failed: #{inspect(reason)}")
-    assign(socket, :count_attempt, nil)
+    assign(socket, count_attempt: nil, count_failed?: true)
   end
 
   defp apply_async_count_result(socket, _attempt, _result), do: socket

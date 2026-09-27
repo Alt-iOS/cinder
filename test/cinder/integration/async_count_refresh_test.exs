@@ -74,6 +74,22 @@ defmodule Cinder.Integration.AsyncCountRefreshTest do
     assert socket.assigns.total_count == 2
   end
 
+  test "a failed count tells the controls, until the collection counts again" do
+    create_item("First")
+    socket = collection_socket()
+    attempt = make_ref()
+    socket = Phoenix.Component.assign(socket, total_count: nil, count_attempt: attempt)
+
+    {:noreply, socket} =
+      LiveComponent.handle_async({:load_count, attempt}, {:exit, :database_unavailable}, socket)
+
+    assert socket.assigns.count_failed?
+
+    {:ok, socket} = LiveComponent.update(%{refresh: true}, socket)
+    refute socket.assigns.count_failed?
+    assert socket.assigns.total_count == 1
+  end
+
   defp collection_socket do
     {:ok, socket} =
       LiveComponent.update(
