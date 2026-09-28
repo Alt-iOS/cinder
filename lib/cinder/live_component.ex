@@ -1355,6 +1355,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:pagination_mode, pagination_mode)
     |> assign(:count_mode, Map.get(assigns, :count_mode, :sync))
     |> assign_new(:total_count, fn -> nil end)
+    |> assign_new(:count_failed?, fn -> false end)
     |> assign_new(:count_query_state, fn -> nil end)
     |> assign_new(:count_attempt, fn -> nil end)
     |> assign(:window_size, window_size)
@@ -1651,7 +1652,12 @@ defmodule Cinder.LiveComponent do
   end
 
   defp invalidate_count(socket) do
-    assign(socket, total_count: nil, count_query_state: nil, count_attempt: nil)
+    assign(socket,
+      total_count: nil,
+      count_query_state: nil,
+      count_attempt: nil,
+      count_failed?: false
+    )
   end
 
   defp prepare_count_for_load(socket) do
@@ -1660,7 +1666,12 @@ defmodule Cinder.LiveComponent do
     if socket.assigns.count_query_state == state do
       socket
     else
-      assign(socket, total_count: nil, count_query_state: state, count_attempt: nil)
+      assign(socket,
+        total_count: nil,
+        count_query_state: state,
+        count_attempt: nil,
+        count_failed?: false
+      )
     end
   end
 
@@ -1696,13 +1707,13 @@ defmodule Cinder.LiveComponent do
 
   defp apply_async_count_result(socket, attempt, {:ok, count})
        when socket.assigns.count_attempt == attempt do
-    assign(socket, total_count: count, count_attempt: nil)
+    assign(socket, total_count: count, count_attempt: nil, count_failed?: false)
   end
 
   defp apply_async_count_result(socket, attempt, {:error, reason})
        when socket.assigns.count_attempt == attempt do
     Logger.warning("Cinder count query failed: #{inspect(reason)}")
-    assign(socket, :count_attempt, nil)
+    assign(socket, count_attempt: nil, count_failed?: true)
   end
 
   defp apply_async_count_result(socket, _attempt, _result), do: socket
