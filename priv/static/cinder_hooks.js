@@ -129,7 +129,11 @@ const CinderInfiniteSentinel = {
     const prefetchDistance = Math.max(viewport.bottom - viewport.top, 400) * (1 + overscan);
 
     this.observer = new IntersectionObserver(
-      async ([entry]) => {
+      async (entries) => {
+        // A busy page can queue several changes before this callback runs, oldest first: the
+        // initial "not yet" and then the scroll that brought the sentinel near. Only the last
+        // says where it is now; reading the first would wait for a change that never comes.
+        const entry = entries[entries.length - 1];
         if (!entry?.isIntersecting || this.triggered) return;
 
         this.triggered = true;
