@@ -1258,6 +1258,20 @@ defmodule Cinder.LiveComponent do
         before: Cinder.UrlManager.decode_cursor(Map.get(raw_params, "before"))
       }
 
+      # Infinite URLs carry a cursor, not the ordinal of a batch in the current
+      # window. Our own URL patch must not turn an in-flight/appended batch back
+      # into page one and issue the same read again.
+      same_cursor? =
+        decoded_state.after == socket.assigns.after_keyset and
+          decoded_state.before == socket.assigns.before_keyset
+
+      current_page =
+        cond do
+          socket.assigns.pagination_mode != :infinite -> decoded_state.current_page
+          same_cursor? -> socket.assigns.current_page
+          true -> 1
+        end
+
       final_sort_by =
         cond do
           decoded_state.sort_by != [] ->
@@ -1291,27 +1305,30 @@ defmodule Cinder.LiveComponent do
       updated_socket =
         if socket.assigns.pagination_mode in [:keyset, :infinite] do
           updated_socket
-          |> maybe_assign_cursor(:after_keyset, decoded_state.after)
-          |> maybe_assign_cursor(:before_keyset, decoded_state.before)
+          |> assign(:after_keyset, decoded_state.after)
+          |> assign(:before_keyset, decoded_state.before)
+        else
+          updated_socket
+        end
+
+      updated_socket =
+        if socket.assigns.pagination_mode == :infinite and not same_cursor? do
+          updated_socket
+          |> mark_infinite_reset()
+          |> assign(:infinite_append?, false)
         else
           updated_socket
         end
 
       updated_socket
       |> assign(:filters, decoded_state.filters)
-      |> assign(
-        :current_page,
-        if(socket.assigns.pagination_mode == :infinite, do: 1, else: decoded_state.current_page)
-      )
+      |> assign(:current_page, current_page)
       |> assign(:sort_by, final_sort_by)
       |> assign(:search_term, decoded_state.search_term)
     else
       socket
     end
   end
-
-  defp maybe_assign_cursor(socket, _key, nil), do: socket
-  defp maybe_assign_cursor(socket, key, cursor), do: assign(socket, key, cursor)
 
   # ============================================================================
   # PRIVATE FUNCTIONS - Initialization
@@ -1339,7 +1356,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:page_size, selected_page_size)
     |> assign(:page_size_config, updated_page_size_config)
     |> assign(:current_page, assigns[:current_page] || 1)
-    |> assign(:loading, false)
+    |> assign(:loading, Map.get(assigns, :loading, false))
     |> assign(:error, assigns[:error] || false)
     |> assign(:data, assigns[:data] || [])
     |> assign(:sort_by, assigns[:sort_by] || extract_initial_sorts(assigns))
