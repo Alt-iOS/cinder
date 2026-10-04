@@ -626,6 +626,10 @@ defmodule Cinder.LiveComponent do
   # ASYNC HANDLERS
   # ============================================================================
 
+  def handle_async(:load_data, {:ok, %Cinder.ActorTransfer{} = transfer}, socket) do
+    handle_async(:load_data, {:ok, Cinder.ActorTransfer.unpack(transfer)}, socket)
+  end
+
   def handle_async(:load_data, {:ok, {{:ok, page}, query}}, socket) do
     socket =
       {:ok, page}
@@ -1069,14 +1073,21 @@ defmodule Cinder.LiveComponent do
           e -> handle_result({:exit, e}, socket)
         end
       else
-        start_async(socket, :load_data, fn ->
-          case Cinder.QueryBuilder.build_query(resource_var, options) do
-            {:ok, prepared_query} ->
-              {Cinder.QueryBuilder.execute(prepared_query, options), prepared_query}
+        transfer = Cinder.ActorTransfer.pack({resource_var, options})
 
-            {:error, _} = error ->
-              {error, nil}
-          end
+        start_async(socket, :load_data, fn ->
+          {resource_var, options} = Cinder.ActorTransfer.unpack(transfer)
+
+          result =
+            case Cinder.QueryBuilder.build_query(resource_var, options) do
+              {:ok, prepared_query} ->
+                {Cinder.QueryBuilder.execute(prepared_query, options), prepared_query}
+
+              {:error, _} = error ->
+                {error, nil}
+            end
+
+          Cinder.ActorTransfer.pack(result)
         end)
       end
     end)
