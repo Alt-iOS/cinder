@@ -6,9 +6,9 @@ defmodule Cinder.ActorTransfer do
   # Put each distinct full actor in the envelope once, then rebuild references
   # in the receiver before invoking any Ash or application code.
   #
-  # Discover map-valued actors under :actor fields/keyword entries. Also replace
-  # equal occurrences elsewhere (for example a scope's :current_user). Equality
-  # includes all fields, not just identity. Closures are opaque and unchanged;
+  # Discover actors through Ash's scope protocol and canonical :actor entries.
+  # Also replace equal occurrences elsewhere, whatever a scope calls its fields.
+  # Equality includes all fields, not just identity. Closures are opaque and unchanged;
   # their captured actors may still lose sharing during transport.
   defstruct [:payload, actors: %{}]
 
@@ -29,6 +29,18 @@ defmodule Cinder.ActorTransfer do
 
   defp collect_actors({:actor, actor}, actors) when is_map(actor) do
     if Map.has_key?(actors, actor), do: actors, else: Map.put(actors, actor, make_ref())
+  end
+
+  defp collect_actors({:scope, scope}, actors) do
+    actors =
+      with impl when not is_nil(impl) <- Ash.Scope.ToOpts.impl_for(scope),
+           {:ok, actor} when is_map(actor) <- Ash.Scope.ToOpts.get_actor(scope) do
+        collect_actors({:actor, actor}, actors)
+      else
+        _ -> actors
+      end
+
+    collect_actors(scope, actors)
   end
 
   defp collect_actors(term, actors) when is_map(term) do

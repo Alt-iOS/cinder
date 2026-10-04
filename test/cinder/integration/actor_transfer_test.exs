@@ -1,5 +1,6 @@
 defmodule Cinder.Integration.ActorTransferTest do
   use Cinder.ConnCase, async: false
+  alias Cinder.Support.ActorTransferScope
   import Phoenix.ConnTest, only: [get: 2]
   import Phoenix.LiveViewTest, only: [live: 2, render_async: 1]
 
@@ -7,12 +8,14 @@ defmodule Cinder.Integration.ActorTransferTest do
     use Ash.Resource.Calculation
 
     def load(_query, _opts, %{actor: actor}) do
-      if actor, do: send(actor.observer, {:calculation_actor, self(), actor})
+      if actor, do: send(actor.observer, {:calculation_actor, :load, self(), actor})
       []
     end
 
-    def calculate(records, _opts, %{actor: actor}),
-      do: Enum.map(records, fn _ -> Enum.join(actor.permissions, ",") end)
+    def calculate(records, _opts, %{actor: actor}) do
+      send(actor.observer, {:calculation_actor, :calculate, self(), actor})
+      Enum.map(records, fn _ -> Enum.join(actor.permissions, ",") end)
+    end
   end
 
   defmodule Record do
@@ -89,24 +92,34 @@ defmodule Cinder.Integration.ActorTransferTest do
       Record
       |> Ash.Query.for_read(:read, %{}, actor: actor, tenant: "north")
 
-    path = fixture(query, %{actor: actor, tenant: "north"})
-    {:ok, view, _html} = live(conn, path)
-    html = render_async(view)
-    assert html =~ "North secret"
-    assert html =~ "read,warehouse:north"
-    refute html =~ "South secret"
+    # Exercise both a raw resource with a scope-only actor and a prepared query.
+    for input <- [Record, query] do
+      path = fixture(input, %ActorTransferScope{user: actor, account: "north"})
+      {:ok, view, _html} = live(conn, path)
+      html = render_async(view)
+      assert html =~ "North secret"
+      assert html =~ "read,warehouse:north"
+      refute html =~ "South secret"
 
-    # Ignore preparation in the test process; observe the actual worker callback.
-    messages = drain_calculation_actors([])
+      # Ignore preparation in the test process; observe the actual worker callback.
+      messages = drain_calculation_actors([])
 
-    assert Enum.any?(messages, fn {pid, value} ->
-             pid != self() and pid != view.pid and value === actor
-           end)
+      assert Enum.any?(messages, fn {phase, pid, value} ->
+               phase == :calculate and pid != self() and pid != view.pid and value === actor
+             end)
+
+      # With a prepared query, load discovery also has the actor already set.
+      if input == query do
+        assert Enum.any?(messages, fn {phase, pid, value} ->
+                 phase == :load and pid != self() and pid != view.pid and value === actor
+               end)
+      end
+    end
 
     revoked = %{actor | allowed?: false, permissions: []}
     # The prepared query retains the allowed actor. The explicit scope overrides
     # it during execution, so same-ID canonicalization must not widen access.
-    denied_path = fixture(query, %{actor: revoked, tenant: "north"})
+    denied_path = fixture(query, %ActorTransferScope{user: revoked, account: "north"})
     {:ok, denied, _html} = live(conn, denied_path)
     denied_html = render_async(denied)
     assert denied_html =~ "Access check failed"
@@ -129,7 +142,8 @@ defmodule Cinder.Integration.ActorTransferTest do
 
   defp drain_calculation_actors(acc) do
     receive do
-      {:calculation_actor, pid, actor} -> drain_calculation_actors([{pid, actor} | acc])
+      {:calculation_actor, phase, pid, actor} ->
+        drain_calculation_actors([{phase, pid, actor} | acc])
     after
       0 -> acc
     end

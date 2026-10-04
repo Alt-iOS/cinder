@@ -1,6 +1,7 @@
 defmodule Cinder.ActorTransferTest do
   use ExUnit.Case, async: true
   alias Cinder.ActorTransfer
+  alias Cinder.Support.ActorTransferScope
 
   defp actor do
     %{id: make_ref(), permissions: Enum.map(1..100, &%{name: Integer.to_string(&1)})}
@@ -26,6 +27,47 @@ defmodule Cinder.ActorTransferTest do
     assert decoded === payload
     assert :erts_debug.same(query.context.private.actor, options[:actor])
     assert Enum.all?(options[:nested], &:erts_debug.same(&1.actor, options[:actor]))
+  end
+
+  test "discovers scope-only actors through the protocol across both process boundaries" do
+    actor = actor()
+    scope = %ActorTransferScope{user: actor, account: "north"}
+    payload = {TestUserResource, scope: scope, context: %{current_user: actor}}
+    envelope = ActorTransfer.pack(payload)
+    assert map_size(envelope.actors) == 1
+    parent = self()
+
+    spawn_link(fn ->
+      {_resource, options} = decoded = ActorTransfer.unpack(envelope)
+      same? = :erts_debug.same(options[:scope].user, options[:context].current_user)
+      send(parent, {same?, ActorTransfer.pack(decoded)})
+    end)
+
+    assert_receive {true, reply}
+    {_resource, options} = decoded = ActorTransfer.unpack(reply)
+    assert decoded === payload
+    assert :erts_debug.same(options[:scope].user, options[:context].current_user)
+  end
+
+  test "keeps distinct actors from custom scopes separate and preserves actor-free scopes" do
+    actor = actor()
+    revoked = %{actor | permissions: []}
+
+    payload = [
+      scope: %ActorTransferScope{user: actor, account: "north"},
+      nested: [scope: %ActorTransferScope{user: revoked, account: "south"}]
+    ]
+
+    envelope = ActorTransfer.pack(payload)
+    assert map_size(envelope.actors) == 2
+    assert ActorTransfer.unpack(envelope) === payload
+
+    for scope <- [nil, "data field", %{}, %ActorTransferScope{}] do
+      payload = [scope: scope]
+      envelope = ActorTransfer.pack(payload)
+      assert envelope.actors == %{}
+      assert ActorTransfer.unpack(envelope) === payload
+    end
   end
 
   test "equal IDs do not merge distinct grants, tenants or authorization options" do
