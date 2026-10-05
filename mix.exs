@@ -54,6 +54,7 @@ defmodule Cinder.MixProject do
   defp deps do
     [
       {:ash, "~> 3.0"},
+      {:picosat_elixir, "~> 0.2", only: :test},
       {:ash_phoenix, "~> 2.3"},
       {:phoenix_live_view, "~> 1.1"},
       {:gettext, "~> 1.0.0"},
