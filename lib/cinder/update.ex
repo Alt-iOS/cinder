@@ -137,11 +137,12 @@ defmodule Cinder.Update do
 
   The item is removed from the currently rendered data without a database query.
   If it was selected, its ID is also removed from the collection's selection and
-  `on_selection_change` is notified with `action: :remove`.
+  `on_selection_change` is notified with `action: :remove`. The pagination footer
+  follows along: the total count drops by the number of rows actually removed.
 
-  This operation does not backfill the current page or recalculate pagination
-  totals, computed fields, or aggregates. Follow it with `refresh_table/2` when
-  those values must be reconciled. Infinite collections remove matching rows
+  Rows from the next page do not move up to fill the gap, and computed fields,
+  aggregates and ordering are not recalculated. Follow it with `refresh_table/2`
+  when those must be reconciled. Infinite collections remove matching rows
   from the client stream and its retained metadata window.
 
   ## Example
@@ -172,43 +173,6 @@ defmodule Cinder.Update do
     send_update(Cinder.LiveComponent,
       id: collection_id,
       __remove_items__: ids
-    )
-
-    socket
-  end
-
-  @doc """
-  Deselects one item without removing it from the collection.
-
-  This is useful when an externally observed change makes a rendered item no
-  longer eligible for an operation but the application still wants to display
-  it. If the ID was selected, Cinder removes it from the current selection and
-  notifies `on_selection_change` with `action: :deselect`.
-
-  The collection's filtered select-all scope is preserved because the item
-  still belongs to the collection.
-
-  ## Example
-
-      def handle_info({:product_unavailable, product_id}, socket) do
-        {:noreply, deselect_item(socket, "products-table", product_id)}
-      end
-  """
-  def deselect_item(socket, collection_id, id) when is_binary(collection_id) do
-    deselect_items(socket, collection_id, [id])
-  end
-
-  @doc """
-  Deselects multiple items without removing their rendered rows.
-
-  IDs that are not selected are ignored. Unlike `remove_items/3`, this function
-  does not change collection data or remove IDs from the cached filtered scope.
-  """
-  def deselect_items(socket, collection_id, ids)
-      when is_binary(collection_id) and is_list(ids) do
-    send_update(Cinder.LiveComponent,
-      id: collection_id,
-      __deselect_items__: ids
     )
 
     socket

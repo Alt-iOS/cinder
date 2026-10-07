@@ -401,6 +401,62 @@ defmodule Cinder.Integration.UpdateItemTest do
       refute_receive {:selection_changed, _payload}
     end
 
+    test "keeps an offset page's results and count in step with the rendered rows" do
+      data = [%{id: "a"}, %{id: "b"}, %{id: "c"}]
+      page = %Ash.Page.Offset{results: data, count: 10, limit: 3, offset: 0, more?: true}
+      socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} =
+        LiveComponent.update(%{__remove_items__: ["a", "c", "elsewhere"]}, socket)
+
+      assert updated_socket.assigns.page.results == [%{id: "b"}]
+      assert updated_socket.assigns.page.count == 8
+    end
+
+    test "keeps a keyset page's results and count in step with the rendered rows" do
+      data = [%{id: "a"}, %{id: "b"}]
+      page = %Ash.Page.Keyset{results: data, count: 5, limit: 2, more?: true}
+      socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a"]}, socket)
+
+      assert updated_socket.assigns.page.results == [%{id: "b"}]
+      assert updated_socket.assigns.page.count == 4
+    end
+
+    test "lowers the total count by the rows actually removed" do
+      data = [%{id: "a"}, %{id: "b"}]
+      socket = make_socket(%{data: data, total_count: 7, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} =
+        LiveComponent.update(%{__remove_items__: ["a", "elsewhere"]}, socket)
+
+      assert updated_socket.assigns.total_count == 6
+    end
+
+    test "leaves a count that has not arrived alone" do
+      data = [%{id: "a"}, %{id: "b"}]
+      page = %Ash.Page.Keyset{results: data, count: nil, limit: 2, more?: true}
+
+      socket =
+        make_socket(%{data: data, page: page, total_count: nil, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a"]}, socket)
+
+      assert updated_socket.assigns.page.count == nil
+      assert updated_socket.assigns.total_count == nil
+    end
+
+    test "never takes the count below zero" do
+      data = [%{id: "a"}, %{id: "b"}]
+      page = %Ash.Page.Offset{results: data, count: 1, limit: 2, offset: 0, more?: false}
+      socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a", "b"]}, socket)
+
+      assert updated_socket.assigns.page.count == 0
+    end
+
     test "handles nil data and missing selection assigns" do
       socket = make_socket(%{data: nil})
 
@@ -517,82 +573,6 @@ defmodule Cinder.Integration.UpdateItemTest do
       assert state.first_keyset == "cursor-1"
       assert state.last_keyset == "cursor-1"
       assert Enum.map(hd(state.infinite_pages).items, & &1.id) == ["1"]
-    end
-  end
-
-  describe "LiveComponent update/2 with __deselect_items__" do
-    test "deselects normalized IDs without removing rows or changing the filtered scope" do
-      socket =
-        make_socket(%{
-          id: "products-table",
-          data: [%{id: 1}, %{id: 2}],
-          selected_ids: MapSet.new(["1", "2"]),
-          selection_scope_ids: MapSet.new(["1", "2", "3"]),
-          on_selection_change: :selection_changed
-        })
-
-      {:ok, updated_socket} =
-        LiveComponent.update(%{__deselect_items__: [2, "missing"]}, socket)
-
-      assert updated_socket.assigns.data == [%{id: 1}, %{id: 2}]
-      assert updated_socket.assigns.selected_ids == MapSet.new(["1"])
-      assert updated_socket.assigns.selection_scope_ids == MapSet.new(["1", "2", "3"])
-
-      assert_receive {:selection_changed,
-                      %{
-                        component_id: "products-table",
-                        selected_ids: selected_ids,
-                        selected_count: 1,
-                        action: :deselect
-                      }}
-
-      assert selected_ids == MapSet.new(["1"])
-    end
-
-    test "does not notify when none of the IDs are selected" do
-      socket =
-        make_socket(%{
-          data: [%{id: "visible"}],
-          selected_ids: MapSet.new(["retained"]),
-          selection_scope_ids: MapSet.new(["visible", "retained"]),
-          on_selection_change: :selection_changed
-        })
-
-      {:ok, updated_socket} =
-        LiveComponent.update(%{__deselect_items__: ["visible"]}, socket)
-
-      assert updated_socket.assigns.data == [%{id: "visible"}]
-      assert updated_socket.assigns.selected_ids == MapSet.new(["retained"])
-      assert updated_socket.assigns.selection_scope_ids == MapSet.new(["visible", "retained"])
-      refute_receive {:selection_changed, _payload}
-    end
-
-    test "deselects virtual rows without pruning the stream or retained window metadata" do
-      socket =
-        make_infinite_socket(%{
-          selected_ids: MapSet.new(["1", "2", "off-page"]),
-          selection_scope_ids: MapSet.new(["1", "2", "off-page"]),
-          on_selection_change: :selection_changed
-        })
-        |> Phoenix.LiveView.stream(:items, [])
-
-      {:ok, updated_socket} =
-        LiveComponent.update(%{__deselect_items__: [2, "off-page"]}, socket)
-
-      assert updated_socket.assigns.selected_ids == MapSet.new(["1"])
-      assert updated_socket.assigns.selection_scope_ids == MapSet.new(["1", "2", "off-page"])
-      assert updated_socket.assigns.infinite_item_ids == MapSet.new(["1", "2"])
-      assert updated_socket.assigns.infinite_selectable_ids == MapSet.new(["1", "2"])
-      assert updated_socket.assigns.infinite_loaded_count == 2
-      assert updated_socket.assigns.infinite_range_start == 7
-      assert updated_socket.assigns.infinite_range_end == 8
-      assert Enum.map(hd(updated_socket.assigns.infinite_pages).items, & &1.id) == ["1", "2"]
-      assert updated_socket.assigns.streams.items.deletes == []
-
-      assert_receive {:selection_changed,
-                      %{action: :deselect, selected_ids: selected_ids, selected_count: 1}}
-
-      assert selected_ids == MapSet.new(["1"])
     end
   end
 

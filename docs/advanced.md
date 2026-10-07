@@ -223,27 +223,17 @@ defmodule MyAppWeb.UsersLive do
 end
 ```
 
-#### Targeted Removal and Deselection
+#### Removing Items
 
 Use `remove_item/3` or `remove_items/3` when the application identifies records
 that no longer belong in the collection. Cinder removes matching rendered items,
 prunes their IDs from the collection selection, and sends `on_selection_change`
-with `action: :remove` if the selection changed.
-
-Use `deselect_item/3` or `deselect_items/3` when an item should remain visible
-but must no longer participate in the current operation. Cinder leaves the row
-and filtered select-all scope intact, removes matching IDs from the selection,
-and sends `on_selection_change` with `action: :deselect` when needed:
-
-```elixir
-def handle_info({:product_unavailable, product_id}, socket) do
-  {:noreply, deselect_item(socket, "products-table", product_id)}
-end
-```
+with `action: :remove` if the selection changed. The pagination footer follows
+along: the total count drops by the number of rows actually removed.
 
 Removal is an in-memory projection change. It does not backfill the current page
-or recalculate pagination totals, aggregates, ordering, or filters. Follow it
-with `refresh_table/2` when the query must be reconciled:
+or recalculate aggregates, ordering, or filters. Follow it with `refresh_table/2`
+when the query must be reconciled:
 
 ```elixir
 def handle_info({:user_deleted, user_id}, socket) do

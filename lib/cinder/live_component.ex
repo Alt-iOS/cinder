@@ -81,14 +81,25 @@ defmodule Cinder.LiveComponent do
 
     socket =
       if infinite_mode?(socket) do
-        remove_infinite_items(socket, id_set)
+        removed = MapSet.size(MapSet.intersection(socket.assigns.infinite_item_ids, id_set))
+
+        socket
+        |> remove_infinite_items(id_set)
+        |> drop_removed_from_count(removed)
       else
+        data = socket.assigns.data || []
+
         updated_data =
-          Enum.reject(socket.assigns.data || [], fn item ->
+          Enum.reject(data, fn item ->
             MapSet.member?(id_set, to_string(Map.get(item, id_field)))
           end)
 
-        assign(socket, :data, updated_data)
+        removed = length(data) - length(updated_data)
+
+        socket
+        |> assign(:data, updated_data)
+        |> assign(:page, drop_removed_from_page(socket.assigns[:page], updated_data, removed))
+        |> drop_removed_from_count(removed)
       end
 
     selected_ids = socket.assigns[:selected_ids] || MapSet.new()
@@ -115,39 +126,6 @@ defmodule Cinder.LiveComponent do
         socket
       else
         notify_selection_change(socket, :remove)
-      end
-
-    {:ok, socket}
-  end
-
-  def update(%{__deselect_items__: ids}, %{assigns: %{selection_mode: :all_matching}} = socket)
-      when is_list(ids) do
-    id_set = MapSet.new(ids, &to_string/1)
-    selected_ids = socket.assigns[:selected_ids] || MapSet.new()
-    updated_selected_ids = MapSet.union(selected_ids, id_set)
-    socket = assign(socket, :selected_ids, updated_selected_ids)
-
-    socket =
-      if MapSet.equal?(selected_ids, updated_selected_ids) do
-        socket
-      else
-        notify_selection_change(socket, :deselect)
-      end
-
-    {:ok, socket}
-  end
-
-  def update(%{__deselect_items__: ids}, socket) when is_list(ids) do
-    id_set = MapSet.new(ids, &to_string/1)
-    selected_ids = socket.assigns[:selected_ids] || MapSet.new()
-    updated_selected_ids = MapSet.difference(selected_ids, id_set)
-    socket = assign(socket, :selected_ids, updated_selected_ids)
-
-    socket =
-      if MapSet.equal?(selected_ids, updated_selected_ids) do
-        socket
-      else
-        notify_selection_change(socket, :deselect)
       end
 
     {:ok, socket}
@@ -336,6 +314,24 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_pages, pages)
     |> assign(:infinite_selectable_ids, selectable_ids)
   end
+
+  # The footer reads page.results and page.count
+  defp drop_removed_from_page(%{results: _} = page, updated_data, removed) do
+    page = %{page | results: updated_data}
+
+    case Map.get(page, :count) do
+      count when is_integer(count) -> %{page | count: max(count - removed, 0)}
+      _ -> page
+    end
+  end
+
+  defp drop_removed_from_page(page, _updated_data, _removed), do: page
+
+  defp drop_removed_from_count(%{assigns: %{total_count: count}} = socket, removed)
+       when is_integer(count),
+       do: assign(socket, :total_count, max(count - removed, 0))
+
+  defp drop_removed_from_count(socket, _removed), do: socket
 
   defp remove_infinite_items(socket, id_set) do
     removed_visible_ids = MapSet.intersection(socket.assigns.infinite_item_ids, id_set)
