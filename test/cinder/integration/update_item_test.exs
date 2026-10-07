@@ -266,6 +266,169 @@ defmodule Cinder.Integration.UpdateItemTest do
     end
   end
 
+  describe "LiveComponent update/2 with __remove_items__" do
+    test "removes matching items while preserving rendered order" do
+      socket =
+        make_socket(%{
+          id_field: :id,
+          data: [
+            %{id: "a", name: "A"},
+            %{id: "b", name: "B"},
+            %{id: "c", name: "C"},
+            %{id: "d", name: "D"}
+          ],
+          selected_ids: MapSet.new()
+        })
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["b", "d"]}, socket)
+
+      assert updated_socket.assigns.data == [%{id: "a", name: "A"}, %{id: "c", name: "C"}]
+    end
+
+    test "uses the configured ID field" do
+      socket =
+        make_socket(%{
+          id_field: :uuid,
+          data: [%{uuid: "a"}, %{uuid: "b"}],
+          selected_ids: MapSet.new()
+        })
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a"]}, socket)
+
+      assert updated_socket.assigns.data == [%{uuid: "b"}]
+    end
+
+    test "normalizes incoming IDs for rendered data and selection" do
+      socket =
+        make_socket(%{
+          data: [%{id: 123}, %{id: 456}],
+          selected_ids: MapSet.new(["123", "456"])
+        })
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: [123]}, socket)
+
+      assert updated_socket.assigns.data == [%{id: 456}]
+      assert updated_socket.assigns.selected_ids == MapSet.new(["456"])
+    end
+
+    test "prunes removed IDs from cross-page selection and notifies the parent" do
+      socket =
+        make_socket(%{
+          id: "users-table",
+          id_field: :id,
+          data: [%{id: "visible"}],
+          selected_ids: MapSet.new(["visible", "off-page", "retained"]),
+          on_selection_change: :selection_changed
+        })
+
+      {:ok, updated_socket} =
+        LiveComponent.update(%{__remove_items__: ["visible", "off-page"]}, socket)
+
+      assert updated_socket.assigns.data == []
+      assert updated_socket.assigns.selected_ids == MapSet.new(["retained"])
+
+      assert_receive {:selection_changed,
+                      %{
+                        component_id: "users-table",
+                        selected_ids: selected_ids,
+                        selected_count: 1,
+                        action: :remove
+                      }}
+
+      assert selected_ids == MapSet.new(["retained"])
+    end
+
+    test "does not notify when removal leaves selection unchanged" do
+      socket =
+        make_socket(%{
+          id: "users-table",
+          data: [%{id: "removed"}],
+          selected_ids: MapSet.new(["retained"]),
+          on_selection_change: :selection_changed
+        })
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["removed"]}, socket)
+
+      assert updated_socket.assigns.data == []
+      assert updated_socket.assigns.selected_ids == MapSet.new(["retained"])
+      refute_receive {:selection_changed, _payload}
+    end
+
+    test "handles nil data and missing selection assigns" do
+      socket = make_socket(%{data: nil})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["missing"]}, socket)
+
+      assert updated_socket.assigns.data == []
+      assert updated_socket.assigns.selected_ids == MapSet.new()
+    end
+
+    test "ignores unrelated assigns in the focused removal update" do
+      socket = make_socket(%{data: [%{id: 1}, %{id: 2}], selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} =
+        LiveComponent.update(%{__remove_items__: [1], other_assign: "ignored"}, socket)
+
+      assert updated_socket.assigns.data == [%{id: 2}]
+      refute Map.has_key?(updated_socket.assigns, :other_assign)
+      refute Map.has_key?(updated_socket.assigns, :__remove_items__)
+    end
+
+    test "keeps an offset page's results and count in step with the rendered rows" do
+      data = [%{id: "a"}, %{id: "b"}, %{id: "c"}]
+
+      page = %Ash.Page.Offset{results: data, count: 10, limit: 3, offset: 0, more?: true}
+      socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
+
+      # "elsewhere" is not on this page, so only two rows are actually removed
+      {:ok, updated_socket} =
+        LiveComponent.update(%{__remove_items__: ["a", "c", "elsewhere"]}, socket)
+
+      assert updated_socket.assigns.page.results == [%{id: "b"}]
+      assert updated_socket.assigns.page.count == 8
+    end
+
+    test "keeps a keyset page's results and count in step with the rendered rows" do
+      data = [%{id: "a"}, %{id: "b"}]
+      page = %Ash.Page.Keyset{results: data, count: 5, limit: 2, more?: true}
+      socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a"]}, socket)
+
+      assert updated_socket.assigns.page.results == [%{id: "b"}]
+      assert updated_socket.assigns.page.count == 4
+    end
+
+    test "leaves the count alone when the page has none" do
+      data = [%{id: "a"}, %{id: "b"}]
+      page = %Ash.Page.Keyset{results: data, count: nil, limit: 2, more?: true}
+      socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a"]}, socket)
+
+      assert updated_socket.assigns.page.results == [%{id: "b"}]
+      assert updated_socket.assigns.page.count == nil
+    end
+
+    test "never takes the count below zero" do
+      data = [%{id: "a"}, %{id: "b"}]
+      page = %Ash.Page.Offset{results: data, count: 1, limit: 2, offset: 0, more?: false}
+      socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a", "b"]}, socket)
+
+      assert updated_socket.assigns.page.count == 0
+    end
+
+    test "copes with a collection that has not loaded a page yet" do
+      socket = make_socket(%{data: [], page: nil, selected_ids: MapSet.new()})
+
+      {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a"]}, socket)
+
+      assert updated_socket.assigns.page == nil
+    end
+  end
+
   describe "LiveComponent update/2 with __update_item_if_visible__" do
     test "updates item when it exists in data" do
       socket =
