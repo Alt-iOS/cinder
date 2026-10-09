@@ -11,6 +11,8 @@ defmodule Cinder.Integration.LiveViewTest do
   """
   use Cinder.ConnCase, async: false
 
+  require Ash.Query
+
   # The collection markup under test. The fixture LiveView has no logic of its
   # own — this function supplies the template, so what's exercised is real
   # Cinder, not test scaffolding.
@@ -26,6 +28,18 @@ defmodule Cinder.Integration.LiveViewTest do
       <:col :let={album} field="price" filter sort>{Decimal.to_string(album.price)}</:col>
       <:col :let={album} field="release_date" filter sort>{to_string(album.release_date)}</:col>
       <:col :let={album} field="is_remastered" filter>{to_string(album.is_remastered)}</:col>
+    </Cinder.collection>
+    """
+  end
+
+  defp preselected_album_collection(assigns) do
+    query = Ash.Query.filter(Cinder.Integration.Album, genre == :jazz)
+    assigns = assign(assigns, query: query, selected: query |> Ash.read!() |> Enum.map(& &1.id))
+
+    ~H"""
+    <Cinder.collection query={@query} url_state={@url_state} selectable selected={@selected}>
+      <:col :let={album} field="title">{album.title}</:col>
+      <:bulk_action action={fn selected_query, _opts -> {:ok, selected_query} end} label="Archive ({count})" />
     </Cinder.collection>
     """
   end
@@ -247,6 +261,18 @@ defmodule Cinder.Integration.LiveViewTest do
       |> assert_has("td", text: "Dirt")
       |> refute_has("td", text: "Blue Train")
       |> assert_has("tr[data-key=row_class]:first-child td:first-child", text: "Dirt")
+    end
+  end
+
+  describe "initial selection" do
+    test "a collection starts with the IDs it is given selected", %{conn: conn} do
+      path = Cinder.TestLive.Fixture.register(&preselected_album_collection/1)
+      count = Cinder.Integration.Album |> Ash.Query.filter(genre == :jazz) |> Ash.count!()
+
+      conn
+      |> visit(path)
+      |> assert_has("button", text: "Archive (#{count})")
+      |> assert_has("input[phx-click=toggle_select][checked]", count: count)
     end
   end
 end

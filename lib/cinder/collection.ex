@@ -256,6 +256,13 @@ defmodule Cinder.Collection do
       "Enable row/item selection via checkboxes. Accepts `true`/`false` to enable for all rows, or a predicate `fn item -> boolean end` to make only matching rows selectable."
   )
 
+  attr(:selected, :list,
+    default: [],
+    doc:
+      "IDs selected when the collection first renders, such as the values a form already holds. " <>
+        "The collection owns its selection from then on and reports it through `on_selection_change`."
+  )
+
   attr(:on_selection_change, :any,
     default: nil,
     doc:
@@ -397,6 +404,7 @@ defmodule Cinder.Collection do
       |> assign_new(:grid_columns, fn -> nil end)
       |> assign_new(:pagination, fn -> :offset end)
       |> assign_new(:selectable, fn -> false end)
+      |> assign_new(:selected, fn -> [] end)
       |> assign_new(:on_selection_change, fn -> nil end)
       |> assign(:sort_mode, normalize_sort_mode(assigns[:sort_mode]))
 
@@ -521,6 +529,7 @@ defmodule Cinder.Collection do
         pagination_mode={@pagination_mode}
         id_field={@id_field}
         selectable={@selectable}
+        selected={@selected}
         on_selection_change={@on_selection_change}
         on_query_change={@on_query_change}
         bulk_action_slots={@bulk_action_slots}
