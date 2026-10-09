@@ -456,7 +456,12 @@ defmodule Cinder.QueryBuilder do
 
   ## Returns
   The modified query with search conditions applied, or the original query
-  if no search term is provided or no searchable columns exist.
+  if no search term is provided, it is shorter than `:search_min_length`, or no
+  searchable columns exist.
+
+  ## Minimum length
+  `config :cinder, search_min_length: 3` leaves shorter terms out of the query (1 by
+  default). One or two characters match nearly every row, and trigram indexes need three.
 
   ## Examples
 
@@ -481,6 +486,9 @@ defmodule Cinder.QueryBuilder do
     searchable_columns = Enum.filter(columns, & &1.searchable)
 
     cond do
+      too_short?(search_term) ->
+        query
+
       Enum.empty?(searchable_columns) ->
         query
 
@@ -492,6 +500,13 @@ defmodule Cinder.QueryBuilder do
         # Default search: OR logic across searchable columns using text filter infrastructure
         build_default_search(query, searchable_columns, search_term)
     end
+  end
+
+  defp too_short?(search_term) do
+    search_term
+    |> String.trim()
+    |> String.length()
+    |> Kernel.<(Application.get_env(:cinder, :search_min_length, 1))
   end
 
   # Builds default search using OR logic across searchable columns
