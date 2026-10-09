@@ -1970,7 +1970,7 @@ defmodule Cinder.LiveComponent do
     # Selection state
     |> assign(:selectable, assigns[:selectable] || false)
     |> assign(:select_all, Map.get(assigns, :select_all, :query))
-    |> assign_new(:selected_ids, fn -> MapSet.new() end)
+    |> assign_new(:selected_ids, fn -> MapSet.new(assigns[:selected] || []) end)
     |> assign_new(:selection_mode, fn -> :explicit end)
     |> assign_new(:selection_scope_ids, fn -> nil end)
     |> assign_new(:selection_attempt, fn -> nil end)

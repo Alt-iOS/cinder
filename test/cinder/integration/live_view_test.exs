@@ -66,6 +66,18 @@ defmodule Cinder.Integration.LiveViewTest do
     """
   end
 
+  defp preselected_album_collection(assigns) do
+    query = Ash.Query.filter(Cinder.Integration.Album, genre == :jazz)
+    assigns = assign(assigns, query: query, selected: query |> Ash.read!() |> Enum.map(& &1.id))
+
+    ~H"""
+    <Cinder.collection query={@query} url_state={@url_state} selectable selected={@selected}>
+      <:col :let={album} field="title">{album.title}</:col>
+      <:bulk_action action={fn selected_query, _opts -> {:ok, selected_query} end} label="Archive ({count})" />
+    </Cinder.collection>
+    """
+  end
+
   defp overscan_album_collection(assigns) do
     ~H"""
     <Cinder.collection
@@ -203,6 +215,16 @@ defmodule Cinder.Integration.LiveViewTest do
         |> Phoenix.LiveViewTest.render_click()
       end)
       |> assert_has("button", text: "Archive (3)")
+    end
+
+    test "a collection starts with the IDs it is given selected", %{conn: conn} do
+      path = Cinder.TestLive.Fixture.register(&preselected_album_collection/1)
+      count = Cinder.Integration.Album |> Ash.Query.filter(genre == :jazz) |> Ash.count!()
+
+      conn
+      |> visit(path)
+      |> assert_has("button", text: "Archive (#{count})")
+      |> assert_has("input[phx-click=toggle_select][checked]", count: count)
     end
 
     test "infinite query deselections survive DOM window pruning", %{conn: conn} do

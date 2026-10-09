@@ -4,7 +4,6 @@
 
 ### Features
 
-* Added `Cinder.remove_item/3` and `Cinder.remove_items/3` to remove records from a collection without reloading it. They also drop the records from the selection and keep the pagination footer count in step.
 * Added `initial_load={:sync}`, which puts the first page of data in the server-rendered HTML. Thanks @Alt-iOS! ([#203](https://github.com/sevenseacat/cinder/pull/203))
 * `on_query_change` payloads now carry a `count` key with the total matching records, so parents no longer need their own `Ash.count!`. Thanks @mbaertschi! ([#208](https://github.com/sevenseacat/cinder/pull/208))
 
