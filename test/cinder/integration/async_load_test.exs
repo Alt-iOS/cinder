@@ -238,4 +238,20 @@ defmodule Cinder.Integration.AsyncLoadTest do
     assert html =~ "Buffered Album"
     refute html =~ "Loading albums"
   end
+
+  test "a change that leaves the filters and search as they were keeps the rows", %{
+    conn: conn,
+    sync_no_url_path: path
+  } do
+    {:ok, view, html} = live(conn, path)
+    assert html =~ "Async Album"
+    form = element(view, "form[phx-change=filter_change]")
+
+    # Typing in a filter's own search box, say, changes nothing the collection reads.
+    refute render_change(form, %{"filters" => %{"title" => "", "title_search" => "Buf"}}) =~
+             ~s(data-key="loading_overlay_class")
+
+    assert render_change(form, %{"filters" => %{"title" => "Buffered"}}) =~
+             ~s(data-key="loading_overlay_class")
+  end
 end
