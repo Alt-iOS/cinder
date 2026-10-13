@@ -164,6 +164,13 @@ defmodule Cinder.Renderers.TableSelectionTest do
       assert html =~ "test-checkbox-class"
     end
 
+    test "each cell is named after its column, for a theme showing cells apart from the header" do
+      assigns = Map.put(base_assigns(), :data, [%{id: "user-1", name: "Alice"}])
+      html = render_component(&TableRenderer.render/1, assigns)
+
+      assert html =~ ~s(data-label="Name")
+    end
+
     test "does not render selection elements when selectable=false" do
       assigns =
         base_assigns()
