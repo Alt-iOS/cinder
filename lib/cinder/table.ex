@@ -70,11 +70,8 @@ defmodule Cinder.Table do
 
   attr :pagination, :any,
     default: :offset,
-    doc: "Pagination mode: :offset, :keyset, or :infinite"
-
-  attr :count, :any,
-    default: nil,
-    doc: "Total-count mode: :sync, :async, or false. Infinite pagination defaults to false."
+    doc:
+      "Pagination mode: :offset, :keyset, or :infinite, or a keyword list with `mode` and `count`"
 
   attr :window_size, :integer,
     default: nil,

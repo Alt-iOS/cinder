@@ -215,8 +215,33 @@ defmodule MyAppWeb.UsersLive do
       %{user | active: false}
     end)}
   end
+
+  # Remove deleted items immediately
+  def handle_info({:user_deleted, user_id}, socket) do
+    {:noreply, remove_item(socket, "users-table", user_id)}
+  end
 end
 ```
+
+#### Removing Items
+
+Use `remove_item/3` or `remove_items/3` when the application knows that records no
+longer belong in the collection (for example after a delete broadcast). Cinder
+removes the matching rows, drops their IDs from the collection selection (sending
+`on_selection_change` with `action: :remove` if the selection changed), and keeps
+the pagination footer in step by decreasing the total count by the number of rows
+actually removed:
+
+```elixir
+def handle_info({:users_deleted, user_ids}, socket) do
+  {:noreply, remove_items(socket, "users-table", user_ids)}
+end
+```
+
+Rows from the next page do not move up to fill the gap, and aggregates and ordering
+are not recalculated. Follow the removal with `refresh_table/2` when the query must
+be reconciled. The exception is a removal that empties the page: the collection then
+reads that page again, or the previous one if the emptied page was the last.
 
 #### Lazy Loading with `update_if_visible`
 
@@ -268,9 +293,35 @@ first bounded window; it does not load the entire result set into server memory.
 #### Caveats
 
 - These functions modify in-memory data only. Computed fields, aggregates, and calculations from the database will NOT be recalculated.
+- Removing items does not backfill the page; rows from the next page move up on the next refresh. A removal that empties the page reads it again.
 - For changes that affect derived data, use `refresh_table/2` instead.
 - If the item is not found in the current page, the update is silently ignored.
 - Infinite stream transforms must preserve the collection's configured ID field.
+
+For notification-driven changes that require a full requery, keep the current
+rows visible while their replacement loads with a silent asynchronous refresh:
+
+```elixir
+def handle_info(%Ash.Notifier.Notification{}, socket) do
+  {:noreply, refresh_table(socket, "users-table", silent: true)}
+end
+```
+
+A silent refresh keeps the collection marked as loading internally but hides the
+visual loading state. If it fails, the
+error is logged and the current data stays visible without an error indicator.
+Collections without existing rows use normal loading and error behavior, even
+when `silent: true` is requested. Omitting `:silent` or passing `false` keeps the
+normal refresh behavior.
+
+The option also applies to multiple collections:
+
+```elixir
+{:noreply, refresh_tables(socket, ["users-table", "audit-logs-table"], silent: true)}
+```
+
+Both `refresh_table/3` and `refresh_tables/3` require `:silent` to be a boolean;
+other values, such as `"true"`, raise `ArgumentError`.
 
 ## Loading, Empty & Error States
 
@@ -413,8 +464,7 @@ Use `query_opts` to load only needed data:
 <Cinder.collection
   resource={MyApp.User}
   actor={@current_user}
-  pagination={:keyset}
-  count={:async}
+  pagination={[mode: :keyset, count: :async]}
 >
   ...
 </Cinder.collection>
@@ -447,6 +497,20 @@ config :cinder, default_page_size: [default: 25, options: [10, 25, 50, 100]]
 
 Individual collections can still override with the `page_size` attribute.
 
+**Counting Records:**
+
+By default every page read also counts the matching records, which powers the "Page 2 of 10" and "showing 11-20 of 100" footer. On large tables that count can cost more than the page itself, so it can be changed with the `count` option of `pagination`:
+
+- `count: true` (default): counts as part of each page read.
+- `count: :async`: reads the page first and counts in the background, so the total appears when it is ready. The previous total stays on screen until the new one arrives. `on_query_change` is notified twice: once when the page loads, with a `nil` count, and again with the count once it arrives.
+- `count: false`: never counts. Pagination shows only previous/next navigation, and the `on_query_change` payload and controls slot have a `nil` total. This is the default of infinite pagination.
+
+```heex
+<Cinder.collection resource={MyApp.Event} actor={@current_user} pagination={[mode: :keyset, count: false]}>
+  ...
+</Cinder.collection>
+```
+
 **Pagination Modes:**
 
 - **Offset** (default): Traditional page numbers, allows jumping to any page. Can be slow on large datasets.
@@ -455,13 +519,7 @@ Individual collections can still override with the `page_size` attribute.
 
 **Total Counts:**
 
-Use the `count` attribute to control exact filtered totals independently from pagination:
-
-- `count={:sync}` waits for the exact count before rendering the page. This preserves the existing default for offset and keyset pagination.
-- `count={:async}` renders cursor navigation immediately from `more?`, then calculates and displays the exact total separately. The result is reused while navigating the same filtered query.
-- `count={false}` never calculates or displays an exact total. Previous/next and infinite sentinels use cursor state and `more?` instead.
-
-Infinite pagination defaults to `count={false}` because its loading and end states do not require a total. Set `count={:sync}` or `count={:async}` explicitly when an infinite collection needs the exact count. Offset and keyset pagination default to `count={:sync}` for backwards compatibility.
+The `count` option of `pagination` (see **Counting Records** above) controls exact filtered totals independently from the mode. Infinite pagination defaults to `count: false` because its loading and end states do not require a total; set `pagination={[mode: :infinite, count: true]}` or `count: :async` when an infinite collection needs the exact count. Offset and keyset pagination default to `count: true`.
 
 For infinite pagination, `page_size` remains the Ash query batch size. `overscan` controls how many additional batches are prefetched (default `1`). `window_size` controls the client-side stream window and is rounded up to a whole number of batches; by default it is `page_size * (1 + 2 * overscan)`. For example, `page_size={25}`, `overscan={1}`, and `window_size={75}` load 25 records per query, prefetch one batch, and retain at most 75 rendered records. Cinder keeps cursor, page, ID, and selection metadata for the retained window, not the full record structs.
 
@@ -750,7 +808,7 @@ You can also track selection state in your parent LiveView. This is not necessar
 ```elixir
 def handle_info({:selection_changed, payload}, socket) do
   # payload contains: %{selected_ids, selected_count, component_id, action}
-  # action is one of: :select, :deselect, :select_all, :clear
+  # action is one of: :select, :deselect, :select_all, :clear, :remove
   {:noreply, assign(socket, :selected_count, payload.selected_count)}
 end
 ```
