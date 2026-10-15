@@ -40,7 +40,6 @@ defmodule Cinder.Integration.LiveViewTest do
       resource={Cinder.Integration.Album}
       pagination={:infinite}
       page_size={3}
-      window_size={6}
       overscan={0}
       selectable
       show_item_numbers
@@ -104,7 +103,6 @@ defmodule Cinder.Integration.LiveViewTest do
       query={@query}
       pagination={:infinite}
       page_size={3}
-      window_size={6}
       overscan={0}
     >
       <:col :let={album} field="title">{album.title}</:col>
@@ -227,7 +225,7 @@ defmodule Cinder.Integration.LiveViewTest do
       |> assert_has("input[phx-click=toggle_select][checked]", count: count)
     end
 
-    test "infinite query deselections survive DOM window pruning", %{conn: conn} do
+    test "infinite query deselections survive loading more batches", %{conn: conn} do
       path = Cinder.TestLive.Fixture.register(&infinite_album_collection/1)
 
       conn
@@ -260,13 +258,9 @@ defmodule Cinder.Integration.LiveViewTest do
         |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
         |> Phoenix.LiveViewTest.render_click()
 
-        refute Phoenix.LiveViewTest.has_element?(view, "tr[data-item-number=\"1\"]")
-
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_previous]")
-        |> Phoenix.LiveViewTest.render_click()
-
         assert Phoenix.LiveViewTest.has_element?(view, "tr[data-item-number=\"1\"]")
+        assert Phoenix.LiveViewTest.has_element?(view, "tr[data-item-number=\"9\"]")
+        refute Phoenix.LiveViewTest.has_element?(view, "button[phx-click=load_previous]")
         refute first_id in selected_ids(view)
         assert second_id in selected_ids(view)
 
@@ -455,9 +449,7 @@ defmodule Cinder.Integration.LiveViewTest do
       assert album_reads() == 1
     end
 
-    test "infinite streams prune the browser window instead of retaining every batch", %{
-      conn: conn
-    } do
+    test "infinite streams keep every loaded batch in the browser", %{conn: conn} do
       path = Cinder.TestLive.Fixture.register(&infinite_album_collection/1)
 
       conn
@@ -476,39 +468,22 @@ defmodule Cinder.Integration.LiveViewTest do
         |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
         |> Phoenix.LiveViewTest.render_click()
       end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
-      |> refute_has("tr[data-item-number=\"1\"]")
-      |> assert_has("tr[data-item-number=\"7\"]")
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 9)
+      |> assert_has("tr[data-item-number=\"1\"]")
       |> unwrap(fn view ->
         view
         |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
         |> Phoenix.LiveViewTest.render_click()
       end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
-      |> refute_has("tr[data-item-number=\"4\"]")
+      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 10)
+      |> assert_has("tr[data-item-number=\"1\"]")
       |> assert_has("tr[data-item-number=\"10\"]")
       |> assert_has(
         "[data-pagination-mode=infinite] [data-pagination-state=end][data-key=pagination_info_class]",
         text: "You have reached the end of this list"
       )
       |> refute_has("[data-pagination-mode=infinite] [data-key=page_size_container_class]")
-      |> assert_has("button[phx-click=load_previous]", text: "Load previous")
-      |> unwrap(fn view ->
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_previous]")
-        |> Phoenix.LiveViewTest.render_click()
-      end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
-      |> assert_has("tr[data-item-number=\"2\"]")
-      |> refute_has("tr[data-item-number=\"8\"]")
-      |> unwrap(fn view ->
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_previous]")
-        |> Phoenix.LiveViewTest.render_click()
-      end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
-      |> assert_has("tr[data-item-number=\"1\"]")
-      |> refute_has("tr[data-item-number=\"7\"]")
+      |> refute_has("button[phx-click=load_previous]")
     end
   end
 

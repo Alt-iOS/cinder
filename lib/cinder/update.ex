@@ -193,7 +193,7 @@ defmodule Cinder.Update do
 
   Infinite collections require the raw-item form because LiveView streams do
   not retain rendered records on the server. Cinder checks the stream's small
-  metadata window before invoking the callback, preserves the row's cursor and
+  row metadata before invoking the callback, preserves the row's cursor and
   number, and sends the replacement record through the stream. The callback
   must preserve the configured ID field.
 
@@ -244,8 +244,8 @@ defmodule Cinder.Update do
   in the provided list AND currently visible will be updated. The component
   itself determines which items are visible by checking its current data.
 
-  In infinite mode, pass raw items. Cinder passes only records whose IDs are in
-  the retained stream window, in rendered order, and streams the returned
+  In infinite mode, pass raw items. Cinder passes only records whose IDs are
+  among the loaded rows, in rendered order, and streams the returned
   replacements without retaining them in socket assigns.
 
   The update function is called ONCE with ALL visible items, enabling efficient

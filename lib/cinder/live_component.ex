@@ -1426,31 +1426,18 @@ defmodule Cinder.LiveComponent do
 
     stream_entries = if direction == :prepend, do: Enum.reverse(entries), else: entries
 
-    stream_limit =
-      if direction == :prepend, do: socket.assigns.window_size, else: -socket.assigns.window_size
-
-    stream_opts =
-      [at: if(direction == :prepend, do: 0, else: -1), limit: stream_limit]
-      |> Keyword.put(:reset, direction == :reset)
+    # Every batch read stays in the browser: the stream has no limit, so nothing loaded is
+    # dropped from the page while the reader scrolls.
+    stream_opts = [at: if(direction == :prepend, do: 0, else: -1), reset: direction == :reset]
 
     # A read of several batches (a first load with its overscan) is kept as those batches.
-    {pages, window_pruned?} =
+    pages =
       entries
       |> infinite_batches(socket.assigns.page_size)
       |> Enum.with_index(page_number)
-      |> Enum.reduce({socket.assigns.infinite_pages, false}, fn {batch, number},
-                                                                {pages, pruned?} ->
+      |> Enum.reduce(socket.assigns.infinite_pages, fn {batch, number}, pages ->
         batch_direction = if number == page_number, do: direction, else: :append
-
-        {pages, batch_pruned?} =
-          update_infinite_pages(
-            pages,
-            build_infinite_page_meta(number, batch),
-            batch_direction,
-            socket
-          )
-
-        {pages, pruned? or batch_pruned?}
+        update_infinite_pages(pages, build_infinite_page_meta(number, batch), batch_direction)
       end)
 
     item_ids = pages |> Enum.flat_map(& &1.ids) |> MapSet.new()
@@ -1478,7 +1465,7 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_range_end, range_end)
     |> assign(:first_keyset, first_page && first_page.first_keyset)
     |> assign(:last_keyset, last_page && last_page.last_keyset)
-    |> update_infinite_boundaries(page, direction, window_pruned?)
+    |> update_infinite_boundaries(page, direction)
     |> assign(:infinite_append?, false)
     |> assign(:infinite_direction, :append)
     |> maybe_schedule_infinite_prefetch()
@@ -1522,61 +1509,14 @@ defmodule Cinder.LiveComponent do
     |> Map.put(:last_keyset, items |> List.last() |> then(&(&1 && &1.keyset)))
   end
 
-  defp update_infinite_pages(_pages, %{items: []}, :reset, _socket), do: {[], false}
+  # Batches only gather: every one read stays, before or after those already loaded.
+  defp update_infinite_pages(_pages, %{items: []}, :reset), do: []
+  defp update_infinite_pages(pages, %{items: []}, _direction), do: pages
+  defp update_infinite_pages(_pages, page_meta, :reset), do: [page_meta]
+  defp update_infinite_pages(pages, page_meta, :prepend), do: [page_meta | pages]
+  defp update_infinite_pages(pages, page_meta, _direction), do: pages ++ [page_meta]
 
-  defp update_infinite_pages(pages, %{items: []}, _direction, _socket), do: {pages, false}
-
-  defp update_infinite_pages(_pages, page_meta, :reset, _socket), do: {[page_meta], false}
-
-  defp update_infinite_pages(pages, page_meta, :prepend, socket) do
-    trim_infinite_pages([page_meta | pages], socket.assigns.window_size, :end)
-  end
-
-  defp update_infinite_pages(pages, page_meta, _direction, socket) do
-    trim_infinite_pages(pages ++ [page_meta], socket.assigns.window_size, :start)
-  end
-
-  defp trim_infinite_pages(pages, limit, edge) do
-    overflow = max(Enum.sum(Enum.map(pages, &length(&1.items))) - limit, 0)
-
-    trimmed =
-      case edge do
-        :start -> trim_infinite_page_edge(pages, overflow)
-        :end -> trim_infinite_page_end(pages, overflow)
-      end
-
-    {trimmed, overflow > 0}
-  end
-
-  defp trim_infinite_page_edge(pages, 0), do: pages
-  defp trim_infinite_page_edge([], _drop), do: []
-
-  defp trim_infinite_page_edge([page | rest], drop) do
-    item_count = length(page.items)
-
-    if drop >= item_count do
-      trim_infinite_page_edge(rest, drop - item_count)
-    else
-      [refresh_infinite_page_meta(page, Enum.drop(page.items, drop)) | rest]
-    end
-  end
-
-  defp trim_infinite_page_end(pages, 0), do: pages
-  defp trim_infinite_page_end([], _drop), do: []
-
-  defp trim_infinite_page_end(pages, drop) do
-    page = List.last(pages)
-    item_count = length(page.items)
-
-    if drop >= item_count do
-      pages |> Enum.drop(-1) |> trim_infinite_page_end(drop - item_count)
-    else
-      kept_items = Enum.take(page.items, item_count - drop)
-      List.replace_at(pages, -1, refresh_infinite_page_meta(page, kept_items))
-    end
-  end
-
-  defp update_infinite_boundaries(socket, page, :reset, _window_pruned?) do
+  defp update_infinite_boundaries(socket, page, :reset) do
     before? = not is_nil(socket.assigns.before_keyset)
     after? = not is_nil(socket.assigns.after_keyset)
 
@@ -1585,17 +1525,13 @@ defmodule Cinder.LiveComponent do
     |> assign(:infinite_has_next, before? or has_more_results?(page))
   end
 
-  defp update_infinite_boundaries(socket, page, :prepend, window_pruned?) do
-    socket
-    |> assign(:infinite_has_previous, has_more_results?(page))
-    |> assign(:infinite_has_next, socket.assigns.infinite_has_next or window_pruned?)
-  end
+  # A read before the first row loaded says whether more lies before it, one after the last
+  # whether more follows; the other end stays as it was, since nothing loaded is dropped.
+  defp update_infinite_boundaries(socket, page, :prepend),
+    do: assign(socket, :infinite_has_previous, has_more_results?(page))
 
-  defp update_infinite_boundaries(socket, page, _direction, window_pruned?) do
-    socket
-    |> assign(:infinite_has_previous, socket.assigns.infinite_has_previous or window_pruned?)
-    |> assign(:infinite_has_next, has_more_results?(page))
-  end
+  defp update_infinite_boundaries(socket, page, _direction),
+    do: assign(socket, :infinite_has_next, has_more_results?(page))
 
   defp infinite_range([], _page_size), do: {0, 0}
 
@@ -1605,13 +1541,8 @@ defmodule Cinder.LiveComponent do
     {first_item.number, last_item.number}
   end
 
-  defp infinite_window_batches(socket),
-    do: div(socket.assigns.window_size, socket.assigns.page_size)
-
-  # The batches an infinite collection keeps ahead of the reader: the one shown and its overscan,
-  # as many as its window holds.
-  defp infinite_batches_ahead(socket),
-    do: min(1 + socket.assigns.overscan, infinite_window_batches(socket))
+  # The batches an infinite collection keeps ahead of the reader: the one shown and its overscan.
+  defp infinite_batches_ahead(socket), do: 1 + socket.assigns.overscan
 
   # Where the prefetch would fill the batches kept ahead (a connected collection loading on its
   # own), its first load from the top reads them all in one query instead. A load at a cursor (a
@@ -1919,7 +1850,6 @@ defmodule Cinder.LiveComponent do
     # Determine pagination mode (default to :offset for backwards compatibility)
     pagination_mode = assigns[:pagination_mode] || :offset
     overscan = normalize_overscan(assigns[:overscan])
-    window_size = normalize_window_size(assigns[:window_size], selected_page_size, overscan)
 
     socket
     |> assign(:page_size, selected_page_size)
@@ -1947,7 +1877,6 @@ defmodule Cinder.LiveComponent do
     |> assign_new(:count_failed?, fn -> false end)
     |> assign_new(:count_query_state, fn -> nil end)
     |> assign_new(:count_attempt, fn -> nil end)
-    |> assign(:window_size, window_size)
     |> assign(:overscan, overscan)
     |> assign(:show_item_numbers, assigns[:show_item_numbers] || false)
     |> assign(:after_keyset, assigns[:after_keyset])
@@ -1988,17 +1917,6 @@ defmodule Cinder.LiveComponent do
 
   defp normalize_overscan(value) when is_integer(value) and value >= 0, do: value
   defp normalize_overscan(_value), do: 1
-
-  defp normalize_window_size(value, page_size, overscan) do
-    requested =
-      if is_integer(value) and value >= page_size do
-        value
-      else
-        page_size * (1 + 2 * overscan)
-      end
-
-    ceil(requested / page_size) * page_size
-  end
 
   defp ensure_infinite_stream(socket) do
     if socket.assigns.infinite_stream_configured? do

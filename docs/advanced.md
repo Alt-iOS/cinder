@@ -299,7 +299,7 @@ end
 Use `refresh_table/2` for creates, removals, and updates that can
 change filters, sorting, keyset position, derived values, or numbering. In
 infinite mode, refresh clears the current client stream and requeries only the
-first bounded window; it does not load the entire result set into server memory.
+first batches; it does not load the entire result set into server memory.
 
 #### Caveats
 
@@ -475,7 +475,6 @@ Use `query_opts` to load only needed data:
   actor={@current_user}
   pagination={:infinite}
   page_size={25}
-  window_size={75}
   overscan={1}
   show_item_numbers
 >
@@ -513,7 +512,7 @@ Use the `count` attribute to control exact filtered totals independently from pa
 
 Infinite pagination defaults to `count={false}` because its loading and end states do not require a total. Set `count={:sync}` or `count={:async}` explicitly when an infinite collection needs the exact count. Offset and keyset pagination default to `count={:sync}` for backwards compatibility.
 
-For infinite pagination, `page_size` remains the Ash query batch size. `overscan` controls how many additional batches are prefetched (default `1`). `window_size` controls the client-side stream window and is rounded up to a whole number of batches; by default it is `page_size * (1 + 2 * overscan)`. For example, `page_size={25}`, `overscan={1}`, and `window_size={75}` load 25 records per query, prefetch one batch, and retain at most 75 rendered records. Cinder keeps cursor, page, ID, and selection metadata for the retained window, not the full record structs.
+For infinite pagination, `page_size` remains the Ash query batch size. `overscan` controls how many additional batches are prefetched (default `1`). Every batch loaded stays rendered in the browser while the reader scrolls; nothing is dropped from either end. For example, `page_size={25}` and `overscan={1}` load 25 records per query and prefetch one batch. Cinder keeps cursor, page, ID, and selection metadata for the loaded rows, not the full record structs.
 
 Infinite collections use Cinder's LiveView hook to synchronize selection styling on records that the server has already released. Alias Cinder's shipped hook module in your asset bundler and include it in your `LiveSocket` hook registry. For example, with Vite:
 

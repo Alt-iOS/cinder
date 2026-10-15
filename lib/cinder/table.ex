@@ -76,10 +76,6 @@ defmodule Cinder.Table do
     default: nil,
     doc: "Total-count mode: :sync, :async, or false. Infinite pagination defaults to false."
 
-  attr :window_size, :integer,
-    default: nil,
-    doc: "Maximum browser DOM records retained for infinite pagination"
-
   attr :overscan, :integer,
     default: 1,
     doc: "Additional page-size batches prefetched for infinite pagination"

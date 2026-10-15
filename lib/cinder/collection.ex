@@ -187,13 +187,6 @@ defmodule Cinder.Collection do
       "Total-count mode: :sync, :async, or false. Defaults to :sync for offset/keyset pagination and false for infinite pagination."
   )
 
-  attr(:window_size, :integer,
-    default: nil,
-    doc:
-      "Maximum number of records retained in the browser DOM for infinite pagination. " <>
-        "Defaults to page_size * (1 + 2 * overscan)."
-  )
-
   attr(:overscan, :integer,
     default: 1,
     doc:
@@ -613,7 +606,6 @@ defmodule Cinder.Collection do
         search_fn={@search_fn}
         pagination_mode={@pagination_mode}
         count_mode={@count_mode}
-        window_size={@window_size}
         overscan={@overscan}
         infinite_load={@infinite_load}
         show_item_numbers={@show_item_numbers}

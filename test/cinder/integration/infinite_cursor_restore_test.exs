@@ -117,17 +117,17 @@ defmodule Cinder.Integration.InfiniteCursorRestoreTest do
     assert restored.assigns.infinite_item_ids == first.assigns.infinite_item_ids
   end
 
-  test "a URL echo after window pruning keeps the surviving batches" do
+  test "a URL echo after loading more keeps every loaded batch" do
     for title <- ["One", "Two", "Three", "Four"] do
       SearchTestResource
       |> Ash.Changeset.for_create(:create, %{title: title})
       |> Ash.create!(authorize?: false)
     end
 
-    socket = collection(%{}, window_size: 2)
+    socket = collection(%{})
     {:noreply, second} = LiveComponent.handle_event("load_more", %{}, socket)
     {:noreply, third} = LiveComponent.handle_event("load_more", %{}, second)
-    assert Enum.map(third.assigns.infinite_pages, & &1.page) == [2, 3]
+    assert Enum.map(third.assigns.infinite_pages, & &1.page) == [1, 2, 3]
 
     reject(&Ash.read/2)
 
