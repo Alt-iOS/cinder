@@ -54,6 +54,7 @@ defmodule Cinder.Renderers.Grid do
     <div
       class={[@theme.container_class, "relative"]}
       data-key="container_class"
+      data-loading={@show_loading_state and (@pagination_mode != :infinite or @infinite_loaded_count == 0)}
       data-cinder-infinite-root={@pagination_mode == :infinite}
       data-selection-locked={if @pagination_mode == :infinite, do: @selection_locked}
       data-selected-ids={if @pagination_mode == :infinite, do: InfiniteStream.encode_selected_ids(@render_selected_ids, Map.get(assigns, :infinite_item_ids))}

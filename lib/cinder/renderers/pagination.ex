@@ -110,6 +110,7 @@ defmodule Cinder.Renderers.Pagination do
       |> assign(:total_count, total_count)
       |> assign(:has_total_count, is_integer(total_count))
       |> assign(:has_prev, page.offset > 0)
+      |> assign(:loading, Map.get(assigns, :loading, false))
       |> assign(:has_next, page.more?)
 
     ~H"""
@@ -140,6 +141,7 @@ defmodule Cinder.Renderers.Pagination do
           <button
             :if={@page_number > 2}
             phx-click="goto_page"
+            disabled={@loading}
             phx-value-page="1"
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -152,6 +154,7 @@ defmodule Cinder.Renderers.Pagination do
           <button
             :if={@has_prev}
             phx-click="goto_page"
+            disabled={@loading}
             phx-value-page={@page_number - 1}
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -166,6 +169,7 @@ defmodule Cinder.Renderers.Pagination do
             <button
               :if={page != @page_number}
               phx-click="goto_page"
+              disabled={@loading}
               phx-value-page={page}
               phx-target={@myself}
               class={@theme.pagination_button_class}
@@ -183,6 +187,7 @@ defmodule Cinder.Renderers.Pagination do
           <button
             :if={@has_next}
             phx-click="goto_page"
+            disabled={@loading}
             phx-value-page={@page_number + 1}
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -195,6 +200,7 @@ defmodule Cinder.Renderers.Pagination do
           <button
             :if={@total_pages && @page_number < @total_pages - 1}
             phx-click="goto_page"
+            disabled={@loading}
             phx-value-page={@total_pages}
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -231,6 +237,7 @@ defmodule Cinder.Renderers.Pagination do
       |> assign(:has_total_count, is_integer(total_count))
       |> assign(:has_prev, has_prev)
       |> assign(:has_next, has_next)
+      |> assign(:loading, Map.get(assigns, :loading, false))
 
     ~H"""
     <div class={@theme.pagination_wrapper_class} data-key="pagination_wrapper_class">
@@ -255,7 +262,7 @@ defmodule Cinder.Renderers.Pagination do
             phx-target={@myself}
             class={@theme.pagination_button_class}
             data-key="pagination_button_class"
-            disabled={!@has_prev}
+            disabled={!@has_prev or @loading}
             title={dgettext("cinder", "Previous page")}
           >
             &lsaquo; {dgettext("cinder", "Prev")}
@@ -267,7 +274,7 @@ defmodule Cinder.Renderers.Pagination do
             phx-target={@myself}
             class={@theme.pagination_button_class}
             data-key="pagination_button_class"
-            disabled={!@has_next}
+            disabled={!@has_next or @loading}
             title={dgettext("cinder", "Next page")}
           >
             {dgettext("cinder", "Next")} &rsaquo;

@@ -76,6 +76,47 @@ defmodule Cinder.Renderers.PaginationTest do
     end
   end
 
+  describe "while a page loads" do
+    test "keyset navigation is disabled" do
+      page = %Ash.Page.Keyset{
+        results: [%{id: 1}],
+        count: nil,
+        limit: 10,
+        more?: true,
+        after: "page-1-last-cursor",
+        before: nil,
+        rerun: nil
+      }
+
+      assigns =
+        Map.merge(base_assigns("keyset-loading"), %{
+          pagination_mode: :keyset,
+          total_count: nil,
+          page: page
+        })
+
+      idle = render_component(&Pagination.render/1, assigns)
+      refute idle =~ ~r/phx-click="(prev|next)_page"[^>]*disabled/
+
+      loading = render_component(&Pagination.render/1, Map.put(assigns, :loading, true))
+      assert loading =~ ~r/phx-click="prev_page"[^>]*disabled/
+      assert loading =~ ~r/phx-click="next_page"[^>]*disabled/
+    end
+
+    test "offset navigation is disabled" do
+      idle = render_component(&Pagination.render/1, base_assigns("offset-loading"))
+      refute idle =~ ~r/phx-click="goto_page"[^>]*disabled/
+
+      loading =
+        render_component(
+          &Pagination.render/1,
+          Map.put(base_assigns("offset-loading"), :loading, true)
+        )
+
+      assert loading =~ ~r/phx-click="goto_page"[^>]*disabled/
+    end
+  end
+
   describe "keyset footer" do
     test "shows the total beside cursor navigation, without a page number" do
       assigns =
