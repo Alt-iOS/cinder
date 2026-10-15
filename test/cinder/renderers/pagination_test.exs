@@ -76,16 +76,18 @@ defmodule Cinder.Renderers.PaginationTest do
     end
   end
 
-  describe "keyset numbering" do
-    test "renders a meaningful ordinal range on later pages" do
+  describe "keyset footer" do
+    test "shows the total beside cursor navigation, without a page number" do
       assigns =
         base_assigns("keyset")
         |> Map.merge(%{pagination_mode: :keyset, current_page: 3})
 
       html = render_component(&Pagination.render/1, assigns)
 
-      assert html =~ "Page 3"
-      assert html =~ "showing 21-22 of 100"
+      assert html =~ "100 items"
+      assert html =~ "Next"
+      refute html =~ "Page 3"
+      refute html =~ "showing"
     end
 
     test "renders cursor navigation without a total count" do
@@ -100,7 +102,7 @@ defmodule Cinder.Renderers.PaginationTest do
 
       html = render_component(&Pagination.render/1, assigns)
 
-      assert html =~ "Page 1"
+      refute html =~ "Page 1"
       assert html =~ "Next"
       refute html =~ "showing"
       refute html =~ " of "
@@ -128,7 +130,7 @@ defmodule Cinder.Renderers.PaginationTest do
 
       html = render_component(&Pagination.render/1, assigns)
 
-      assert html =~ "Page 1"
+      refute html =~ "Page 1"
       assert html =~ "Next"
       refute html =~ ~s(title="Previous page" disabled)
     end

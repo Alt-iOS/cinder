@@ -40,21 +40,16 @@ defmodule Cinder.UrlManager do
   def encode_state(%{filters: filters, sort_by: sort_by} = state) do
     encoded_filters = encode_filters(filters)
 
-    # Cursors recover the keyset position while the page number preserves its ordinal.
-    # Offset pagination uses only the page number.
+    # Keyset and infinite pagination store their cursor; offset pagination its page number.
     state_with_page =
       cond do
         # Keyset pagination with after cursor
         is_binary(Map.get(state, :after)) and Map.get(state, :after) != "" ->
-          encoded_filters
-          |> Map.put(:after, state.after)
-          |> maybe_put_page(state)
+          Map.put(encoded_filters, :after, state.after)
 
         # Keyset pagination with before cursor
         is_binary(Map.get(state, :before)) and Map.get(state, :before) != "" ->
-          encoded_filters
-          |> Map.put(:before, state.before)
-          |> maybe_put_page(state)
+          Map.put(encoded_filters, :before, state.before)
 
         # Offset pagination - store page number
         true ->

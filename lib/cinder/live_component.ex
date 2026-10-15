@@ -1758,16 +1758,16 @@ defmodule Cinder.LiveComponent do
         before: Cinder.UrlManager.decode_cursor(Map.get(raw_params, "before"))
       }
 
-      # Infinite URLs carry a cursor, not the ordinal of a batch in the current
-      # window. Our own URL patch must not turn an in-flight/appended batch back
-      # into page one and issue the same read again.
+      # Keyset and infinite URLs carry a cursor, not the ordinal of a page or batch.
+      # Our own URL patch must not turn the page on screen, or an in-flight/appended
+      # batch, back into page one and issue the same read again.
       same_cursor? =
         decoded_state.after == socket.assigns.after_keyset and
           decoded_state.before == socket.assigns.before_keyset
 
       current_page =
         cond do
-          socket.assigns.pagination_mode != :infinite -> decoded_state.current_page
+          socket.assigns.pagination_mode == :offset -> decoded_state.current_page
           same_cursor? -> socket.assigns.current_page
           true -> 1
         end

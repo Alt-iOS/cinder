@@ -143,13 +143,13 @@ defmodule Cinder.Integration.RemoveItemsTest do
       albums: albums
     } do
       {:ok, view, html} = live(conn, path)
-      assert html =~ "showing 1-2 of 5"
+      assert html =~ "5 items"
 
       html = remove(view, [albums["Alpha"].id])
 
       refute html =~ "Alpha"
       assert html =~ "Bravo"
-      assert html =~ "showing 1-1 of 4"
+      assert html =~ "4 items"
     end
   end
 

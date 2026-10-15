@@ -223,11 +223,7 @@ defmodule Cinder.Renderers.Pagination do
 
     has_prev = has_previous_keyset_page?(page)
     has_next = has_next_keyset_page?(page)
-    page_number = Map.get(assigns, :current_page, 1)
     total_count = Map.get(assigns, :total_count) || page.count
-    start_index = if page.results == [], do: 0, else: (page_number - 1) * page.limit + 1
-    end_index = start_index + length(page.results) - 1
-    end_index = if is_integer(total_count), do: min(end_index, total_count), else: end_index
 
     assigns =
       assigns
@@ -235,19 +231,13 @@ defmodule Cinder.Renderers.Pagination do
       |> assign(:has_total_count, is_integer(total_count))
       |> assign(:has_prev, has_prev)
       |> assign(:has_next, has_next)
-      |> assign(:page_number, page_number)
-      |> assign(:start_index, start_index)
-      |> assign(:end_index, max(end_index, 0))
 
     ~H"""
     <div class={@theme.pagination_wrapper_class} data-key="pagination_wrapper_class">
       <div class={@theme.pagination_container_class} data-key="pagination_container_class">
-      <!-- Left side: Count and stable ordinal range -->
+      <!-- Left side: Count info, when counted -->
       <div class={@theme.pagination_info_class} data-key="pagination_info_class">
-        {dgettext("cinder", "Page %{current}", current: @page_number)}
-        <span :if={@has_total_count} class={@theme.pagination_count_class} data-key="pagination_count_class">
-          ({dgettext("cinder", "showing %{start}-%{end} of %{total}", start: @start_index, end: @end_index, total: @total_count)})
-        </span>
+        <span :if={@has_total_count}>{dgettext("cinder", "%{total} items", total: @total_count)}</span>
       </div>
 
       <!-- Right side: Page size selector and navigation -->
