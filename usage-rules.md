@@ -243,7 +243,7 @@ The `<:controls>` slot replaces the default filter/search layout while keeping s
 - `target` - LiveComponent target for `phx-target`
 - `theme` - resolved theme map
 - `table_id`, `filters_label`, `filter_mode`, `filter_values`, `raw_filter_params`
-- `total_count` - how many records match, or nil until counted
+- `total_count` - how many records match, or nil until counted (and when `count: false`)
 
 ### Available Helpers
 - `Cinder.Controls.render_filter/1` - single filter (label + input + clear)
@@ -322,6 +322,12 @@ Keep current rows visible while an asynchronous requery runs:
 {:noreply, refresh_table(socket, "collection-id", silent: true)}
 ```
 
+Use a boolean for `:silent` (defaults to `false`). Silent refreshes keep existing
+rows visible without a loading indicator. On failure, they log the error and
+retain those rows without showing an error indicator. Collections without rows
+use normal loading and error behavior. The option is also available on
+`refresh_tables/3`.
+
 ### In-Memory Changes
 
 For PubSub-driven updates without re-querying:
@@ -335,7 +341,7 @@ import Cinder.Update
 # Update multiple items
 {:noreply, update_items(socket, "table-id", user_ids, fn user -> %{user | active: false} end)}
 
-# Remove deleted items and prune their selection
+# Remove deleted items: drops the rows, prunes their selection, and keeps the footer count in step
 {:noreply, remove_item(socket, "table-id", user_id)}
 {:noreply, remove_items(socket, "table-id", user_ids)}
 
@@ -346,9 +352,9 @@ import Cinder.Update
 end)}
 ```
 
-Removal does not backfill the page or recalculate aggregates, ordering, or
-filters. Follow it with `refresh_table/2` when the collection query
-must be reconciled.
+Removal does not backfill the page or recalculate aggregates or ordering, unless it empties
+the page: then the page is read again (or the previous one, if it was the last). Follow it
+with `refresh_table/2` when the collection query must be reconciled.
 
 ## Query Access
 

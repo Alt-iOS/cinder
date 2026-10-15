@@ -178,13 +178,8 @@ defmodule Cinder.Collection do
   attr(:pagination, :any,
     default: :offset,
     doc:
-      "Pagination mode: :offset (default), :keyset, or :infinite. Infinite pagination appends keyset batches as the viewport reaches the end."
-  )
-
-  attr(:count, :any,
-    default: nil,
-    doc:
-      "Total-count mode: :sync, :async, or false. Defaults to :sync for offset/keyset pagination and false for infinite pagination."
+      "Pagination mode: :offset (default), :keyset, or :infinite. Infinite pagination appends keyset batches as the viewport reaches the end. " <>
+        "Also accepts a keyword list: `[mode: :keyset, count: :async]`, where `count` is true (default, counted with each page), :async (counted in the background) or false (never counted; the default for :infinite)."
   )
 
   attr(:overscan, :integer,
@@ -502,8 +497,7 @@ defmodule Cinder.Collection do
     page_size_config = Cinder.PageSize.parse(assigns.page_size)
 
     # Parse pagination mode
-    pagination_mode = parse_pagination_mode(assigns.pagination)
-    count_mode = normalize_count_mode(assigns.count, pagination_mode)
+    {pagination_mode, count_mode} = parse_pagination(assigns.pagination)
 
     # Select renderer based on layout (support both atoms and strings)
     layout = normalize_layout(assigns.layout)
@@ -1081,14 +1075,38 @@ defmodule Cinder.Collection do
   defp parse_pagination_mode("infinite"), do: :infinite
   defp parse_pagination_mode(_invalid), do: :offset
 
+  # The keyword form is strict: unknown keys and invalid values raise, unlike the
+  # older atom/string form above. Infinite collections skip the count unless asked.
   @doc false
-  def normalize_count_mode(nil, :infinite), do: false
-  def normalize_count_mode(nil, _pagination_mode), do: :sync
-  def normalize_count_mode(mode, _pagination_mode) when mode in [:sync, :async, false], do: mode
+  def parse_pagination(options) when is_list(options) do
+    options = Keyword.validate!(options, mode: :offset, count: nil)
+    mode = validate_pagination_mode(options[:mode])
+    {mode, validate_count_mode(options[:count], mode)}
+  end
 
-  def normalize_count_mode(mode, _pagination_mode) do
+  def parse_pagination(mode) do
+    mode = parse_pagination_mode(mode)
+    {mode, default_count_mode(mode)}
+  end
+
+  defp default_count_mode(:infinite), do: false
+  defp default_count_mode(_mode), do: true
+
+  defp validate_pagination_mode(mode)
+       when mode in [:offset, :keyset, :infinite, "offset", "keyset", "infinite"],
+       do: parse_pagination_mode(mode)
+
+  defp validate_pagination_mode(mode) do
     raise ArgumentError,
-          "invalid count mode #{inspect(mode)}; expected :sync, :async, or false"
+          "invalid pagination mode #{inspect(mode)}; expected :offset, :keyset or :infinite"
+  end
+
+  defp validate_count_mode(nil, mode), do: default_count_mode(mode)
+  defp validate_count_mode(count, _mode) when count in [true, false, :async], do: count
+
+  defp validate_count_mode(count, _mode) do
+    raise ArgumentError,
+          "invalid pagination count #{inspect(count)}; expected true, false or :async"
   end
 
   # ============================================================================

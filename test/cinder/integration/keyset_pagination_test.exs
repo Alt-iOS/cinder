@@ -109,7 +109,7 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       end
     end
 
-    test "can execute keyset and infinite pages without an exact count" do
+    test "can execute offset, keyset and infinite pages without an exact count" do
       base_options = [
         actor: nil,
         filters: %{},
@@ -118,13 +118,12 @@ defmodule Cinder.Integration.KeysetPaginationTest do
         current_page: 1,
         columns: [],
         query_opts: [],
-        pagination_mode: :keyset,
         count_mode: false,
         after_keyset: nil,
         before_keyset: nil
       ]
 
-      for pagination_mode <- [:keyset, :infinite] do
+      for pagination_mode <- [:offset, :keyset, :infinite] do
         {:ok, page} =
           QueryBuilder.build_and_execute(
             TestItem,
@@ -159,17 +158,18 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert {:ok, 10} = QueryBuilder.count(query, options)
     end
 
-    test "normalizes count defaults by pagination mode" do
-      assert Cinder.Collection.normalize_count_mode(nil, :offset) == :sync
-      assert Cinder.Collection.normalize_count_mode(nil, :keyset) == :sync
-      assert Cinder.Collection.normalize_count_mode(nil, :infinite) == false
-      assert Cinder.Collection.normalize_count_mode(:async, :infinite) == :async
-      assert Cinder.Collection.normalize_count_mode(:sync, :infinite) == :sync
-      assert Cinder.Collection.normalize_count_mode(false, :keyset) == false
+    test "parses pagination modes and count options" do
+      assert Cinder.Collection.parse_pagination(:offset) == {:offset, true}
+      assert Cinder.Collection.parse_pagination("keyset") == {:keyset, true}
+      assert Cinder.Collection.parse_pagination(:infinite) == {:infinite, false}
+      assert Cinder.Collection.parse_pagination(count: :async) == {:offset, :async}
+      assert Cinder.Collection.parse_pagination(mode: :keyset, count: false) == {:keyset, false}
+      assert Cinder.Collection.parse_pagination(mode: :infinite) == {:infinite, false}
+      assert Cinder.Collection.parse_pagination(mode: :infinite, count: true) == {:infinite, true}
 
-      assert_raise ArgumentError, fn ->
-        Cinder.Collection.normalize_count_mode(:eventually, :keyset)
-      end
+      assert_raise ArgumentError, fn -> Cinder.Collection.parse_pagination(count: :eventually) end
+      assert_raise ArgumentError, fn -> Cinder.Collection.parse_pagination(mode: :keyest) end
+      assert_raise ArgumentError, fn -> Cinder.Collection.parse_pagination(counts: false) end
     end
 
     test "navigates forward with after cursor" do
@@ -885,10 +885,10 @@ defmodule Cinder.Integration.KeysetPaginationTest do
         |> Phoenix.Component.assign(:infinite_pages, pages)
 
       {:ok, refreshed_socket} =
-        LiveComponent.update(%{refresh: true, silent_refresh: true}, socket)
+        LiveComponent.update(%{refresh: true, silent: true}, socket)
 
       assert refreshed_socket.assigns.loading
-      assert refreshed_socket.assigns.silent_refresh
+      assert refreshed_socket.assigns.silent
       assert refreshed_socket.assigns.current_page == 1
       assert refreshed_socket.assigns.after_keyset == nil
       assert refreshed_socket.assigns.infinite_direction == :reset
@@ -908,7 +908,7 @@ defmodule Cinder.Integration.KeysetPaginationTest do
         )
 
       refute failed_socket.assigns.loading
-      refute failed_socket.assigns.silent_refresh
+      refute failed_socket.assigns.silent
       refute failed_socket.assigns.error
       assert failed_socket.assigns.current_page == 4
       assert failed_socket.assigns.after_keyset == "last_cursor"
@@ -984,40 +984,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert socket.assigns.infinite_loaded_count == 1
       assert socket.assigns.error
       assert socket.assigns.infinite_append?
-    end
-
-    test "an asynchronous count updates only its current attempt" do
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(build_keyset_test_assigns(), socket)
-      socket = Phoenix.LiveView.cancel_async(socket, :load_data)
-      current_attempt = make_ref()
-
-      socket =
-        Phoenix.Component.assign(socket,
-          count_mode: :async,
-          count_attempt: current_attempt,
-          total_count: nil
-        )
-
-      {:noreply, unchanged} =
-        LiveComponent.handle_async(
-          {:load_count, make_ref()},
-          {:ok, {:ok, 99}},
-          socket
-        )
-
-      assert unchanged.assigns.total_count == nil
-      assert unchanged.assigns.count_attempt == current_attempt
-
-      {:noreply, counted} =
-        LiveComponent.handle_async(
-          {:load_count, current_attempt},
-          {:ok, {:ok, 10}},
-          unchanged
-        )
-
-      assert counted.assigns.total_count == 10
-      assert counted.assigns.count_attempt == nil
     end
 
     test "keyset navigation preserves query-wide deselection exceptions" do

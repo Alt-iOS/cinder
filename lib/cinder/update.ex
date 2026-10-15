@@ -23,7 +23,7 @@ defmodule Cinder.Update do
         end)}
       end
 
-      # Remove a deleted item and invalidate its selection
+      # Remove a deleted item and drop it from the selection
       def handle_info({:user_deleted, user_id}, socket) do
         {:noreply, remove_item(socket, "users-table", user_id)}
       end
@@ -43,11 +43,11 @@ defmodule Cinder.Update do
     records in the socket. Pass full records to `update_if_visible/4` or
     `update_items_if_visible/4` so Cinder can stream visible replacements.
     ID-only updates are a no-op in infinite mode.
-  - Removing an item does not backfill its page or recalculate pagination totals.
-  - For creates or changes that affect filtering, sorting, keysets, derived data,
-    row numbering, or pagination, call `Cinder.refresh_table/2` after applying
-    the in-memory change. An infinite refresh resets and requeries its bounded
-    window.
+  - Removing an item does not backfill its page: rows from the next page move up on
+    the next refresh. A removal that empties the page reads it again.
+  - For creates, deletes, or changes that affect filtering, sorting, keysets,
+    derived data, ordering, or row numbering, use `Cinder.refresh_table/2` instead. An
+    infinite refresh resets and requeries its bounded window.
   - If the item is not found in the current data, the update is silently ignored.
   - The `update_if_visible` functions check visibility within the component itself.
   """
@@ -138,12 +138,13 @@ defmodule Cinder.Update do
   The item is removed from the currently rendered data without a database query.
   If it was selected, its ID is also removed from the collection's selection and
   `on_selection_change` is notified with `action: :remove`. The pagination footer
-  follows along: the total count drops by the number of rows actually removed.
+  follows along: the row leaves `page.results` and the total count drops by the
+  number of rows actually removed.
 
   Rows from the next page do not move up to fill the gap, and computed fields,
   aggregates and ordering are not recalculated. Follow it with `refresh_table/2`
-  when those must be reconciled. Infinite collections remove matching rows
-  from the client stream and its retained metadata window.
+  when those must be reconciled. If the removal empties the page, the collection
+  reads that page again (or the previous one, if the emptied page was the last).
 
   ## Example
 
@@ -159,8 +160,8 @@ defmodule Cinder.Update do
   Removes multiple items from a collection by their IDs.
 
   This is the batch equivalent of `remove_item/3`. IDs not present on the current
-  page are ignored for rendered data but are still removed from the collection's
-  selection, which may span pages.
+  page are ignored for rendered data and the total count, but are still removed
+  from the collection's selection, which may span pages.
 
   ## Example
 
@@ -193,7 +194,7 @@ defmodule Cinder.Update do
 
   Infinite collections require the raw-item form because LiveView streams do
   not retain rendered records on the server. Cinder checks the stream's small
-  row metadata before invoking the callback, preserves the row's cursor and
+  metadata window before invoking the callback, preserves the row's cursor and
   number, and sends the replacement record through the stream. The callback
   must preserve the configured ID field.
 
@@ -244,8 +245,8 @@ defmodule Cinder.Update do
   in the provided list AND currently visible will be updated. The component
   itself determines which items are visible by checking its current data.
 
-  In infinite mode, pass raw items. Cinder passes only records whose IDs are
-  among the loaded rows, in rendered order, and streams the returned
+  In infinite mode, pass raw items. Cinder passes only records whose IDs are in
+  the retained stream window, in rendered order, and streams the returned
   replacements without retaining them in socket assigns.
 
   The update function is called ONCE with ALL visible items, enabling efficient

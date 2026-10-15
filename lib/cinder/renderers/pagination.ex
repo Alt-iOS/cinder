@@ -92,8 +92,7 @@ defmodule Cinder.Renderers.Pagination do
     page_number = AshPhoenix.LiveView.page_number(page) + 1
     total_count = Map.get(assigns, :total_count) || page.count
 
-    total_pages =
-      if is_integer(total_count) and total_count > 0, do: ceil(total_count / page.limit)
+    total_pages = total_count && max(ceil(total_count / page.limit), 1)
 
     start_index = page.offset + 1
     end_index = page.offset + length(page.results)
@@ -109,6 +108,7 @@ defmodule Cinder.Renderers.Pagination do
       |> assign(:end_index, if(page.results == [], do: 0, else: end_index))
       |> assign(:total_count, total_count)
       |> assign(:has_total_count, is_integer(total_count))
+      # AshPhoenix derives these from the count
       |> assign(:has_prev, page.offset > 0)
       |> assign(:loading, Map.get(assigns, :loading, false))
       |> assign(:has_next, page.more?)

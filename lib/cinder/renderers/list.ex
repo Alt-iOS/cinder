@@ -38,10 +38,6 @@ defmodule Cinder.Renderers.List do
       |> assign_new(:show_item_numbers, fn -> false end)
       |> assign_new(:current_page, fn -> 1 end)
       |> assign(:selection_locked, Map.get(assigns, :selection_loading, false))
-      |> assign(
-        :show_loading_state,
-        assigns.loading and not Map.get(assigns, :silent_refresh, false)
-      )
       |> assign(:has_item_slot, has_item_slot)
       |> assign(
         :render_selected_ids,

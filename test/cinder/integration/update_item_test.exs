@@ -360,7 +360,7 @@ defmodule Cinder.Integration.UpdateItemTest do
         make_socket(%{
           id: "users-table",
           id_field: :id,
-          data: [%{id: "visible"}],
+          data: [%{id: "visible"}, %{id: "kept"}],
           selected_ids: MapSet.new(["visible", "off-page", "retained"]),
           selection_scope_ids: MapSet.new(["visible", "off-page", "retained"]),
           on_selection_change: :selection_changed
@@ -369,7 +369,7 @@ defmodule Cinder.Integration.UpdateItemTest do
       {:ok, updated_socket} =
         LiveComponent.update(%{__remove_items__: ["visible", "off-page"]}, socket)
 
-      assert updated_socket.assigns.data == []
+      assert updated_socket.assigns.data == [%{id: "kept"}]
       assert updated_socket.assigns.selected_ids == MapSet.new(["retained"])
       assert updated_socket.assigns.selection_scope_ids == MapSet.new(["retained"])
 
@@ -388,7 +388,7 @@ defmodule Cinder.Integration.UpdateItemTest do
       socket =
         make_socket(%{
           id: "users-table",
-          data: [%{id: "removed"}],
+          data: [%{id: "removed"}, %{id: "kept"}],
           selected_ids: MapSet.new(["retained"]),
           on_selection_change: :selection_changed
         })
@@ -396,7 +396,7 @@ defmodule Cinder.Integration.UpdateItemTest do
       {:ok, updated_socket} =
         LiveComponent.update(%{__remove_items__: ["removed"]}, socket)
 
-      assert updated_socket.assigns.data == []
+      assert updated_socket.assigns.data == [%{id: "kept"}]
       assert updated_socket.assigns.selected_ids == MapSet.new(["retained"])
       refute_receive {:selection_changed, _payload}
     end
@@ -448,8 +448,8 @@ defmodule Cinder.Integration.UpdateItemTest do
     end
 
     test "never takes the count below zero" do
-      data = [%{id: "a"}, %{id: "b"}]
-      page = %Ash.Page.Offset{results: data, count: 1, limit: 2, offset: 0, more?: false}
+      data = [%{id: "a"}, %{id: "b"}, %{id: "c"}]
+      page = %Ash.Page.Offset{results: data, count: 1, limit: 3, offset: 0, more?: false}
       socket = make_socket(%{data: data, page: page, selected_ids: MapSet.new()})
 
       {:ok, updated_socket} = LiveComponent.update(%{__remove_items__: ["a", "b"]}, socket)

@@ -225,34 +225,23 @@ end
 
 #### Removing Items
 
-Use `remove_item/3` or `remove_items/3` when the application identifies records
-that no longer belong in the collection. Cinder removes matching rendered items,
-prunes their IDs from the collection selection, and sends `on_selection_change`
-with `action: :remove` if the selection changed. The pagination footer follows
-along: the total count drops by the number of rows actually removed.
-
-Removal is an in-memory projection change. It does not backfill the current page
-or recalculate aggregates, ordering, or filters. Follow it with `refresh_table/2`
-when the query must be reconciled:
+Use `remove_item/3` or `remove_items/3` when the application knows that records no
+longer belong in the collection (for example after a delete broadcast). Cinder
+removes the matching rows, drops their IDs from the collection selection (sending
+`on_selection_change` with `action: :remove` if the selection changed), and keeps
+the pagination footer in step by decreasing the total count by the number of rows
+actually removed:
 
 ```elixir
-def handle_info({:user_deleted, user_id}, socket) do
-  socket = remove_item(socket, "users-table", user_id)
-  {:noreply, refresh_table(socket, "users-table")}
+def handle_info({:users_deleted, user_ids}, socket) do
+  {:noreply, remove_items(socket, "users-table", user_ids)}
 end
 ```
 
-Infinite collections remove matching rows from the client stream and its bounded
-metadata window. Removed IDs are also pruned from filtered select-all state even
-when the row is outside the retained window. To keep the remaining rows visible
-while Cinder reconciles the query, combine removal with a silent refresh:
-
-```elixir
-def handle_info({:user_deleted, user_id}, socket) do
-  socket = remove_item(socket, "users-table", user_id)
-  {:noreply, refresh_table(socket, "users-table", silent: true)}
-end
-```
+Rows from the next page do not move up to fill the gap, and aggregates and ordering
+are not recalculated. Follow the removal with `refresh_table/2` when the query must
+be reconciled. The exception is a removal that empties the page: the collection then
+reads that page again, or the previous one if the emptied page was the last.
 
 #### Lazy Loading with `update_if_visible`
 
@@ -299,19 +288,18 @@ end
 Use `refresh_table/2` for creates, removals, and updates that can
 change filters, sorting, keyset position, derived values, or numbering. In
 infinite mode, refresh clears the current client stream and requeries only the
-first batches; it does not load the entire result set into server memory.
+first bounded window; it does not load the entire result set into server memory.
 
 #### Caveats
 
 - These functions modify in-memory data only. Computed fields, aggregates, and calculations from the database will NOT be recalculated.
-- Removing items does not backfill the page or recalculate pagination totals.
-- For changes that affect derived data, ordering, filtering, or pagination, call
-  `refresh_table/2` after applying the in-memory change.
+- Removing items does not backfill the page; rows from the next page move up on the next refresh. A removal that empties the page reads it again.
+- For changes that affect derived data, use `refresh_table/2` instead.
 - If the item is not found in the current page, the update is silently ignored.
 - Infinite stream transforms must preserve the collection's configured ID field.
 
-When an externally observed change requires a full requery, keep the current rows
-visible while their replacement loads with a silent asynchronous refresh:
+For notification-driven changes that require a full requery, keep the current
+rows visible while their replacement loads with a silent asynchronous refresh:
 
 ```elixir
 def handle_info(%Ash.Notifier.Notification{}, socket) do
@@ -319,8 +307,21 @@ def handle_info(%Ash.Notifier.Notification{}, socket) do
 end
 ```
 
-Cinder still marks the collection as busy internally, but suppresses the visual
-loading treatment. A failed silent refresh retains the current data.
+A silent refresh keeps the collection marked as loading internally but hides the
+visual loading state. If it fails, the
+error is logged and the current data stays visible without an error indicator.
+Collections without existing rows use normal loading and error behavior, even
+when `silent: true` is requested. Omitting `:silent` or passing `false` keeps the
+normal refresh behavior.
+
+The option also applies to multiple collections:
+
+```elixir
+{:noreply, refresh_tables(socket, ["users-table", "audit-logs-table"], silent: true)}
+```
+
+Both `refresh_table/3` and `refresh_tables/3` require `:silent` to be a boolean;
+other values, such as `"true"`, raise `ArgumentError`.
 
 ## Loading, Empty & Error States
 
@@ -463,8 +464,7 @@ Use `query_opts` to load only needed data:
 <Cinder.collection
   resource={MyApp.User}
   actor={@current_user}
-  pagination={:keyset}
-  count={:async}
+  pagination={[mode: :keyset, count: :async]}
 >
   ...
 </Cinder.collection>
@@ -496,6 +496,20 @@ config :cinder, default_page_size: [default: 25, options: [10, 25, 50, 100]]
 
 Individual collections can still override with the `page_size` attribute.
 
+**Counting Records:**
+
+By default every page read also counts the matching records, which powers the "Page 2 of 10" and "showing 11-20 of 100" footer. On large tables that count can cost more than the page itself, so it can be changed with the `count` option of `pagination`:
+
+- `count: true` (default): counts as part of each page read.
+- `count: :async`: reads the page first and counts in the background, so the total appears when it is ready. The previous total stays on screen until the new one arrives. `on_query_change` is notified twice: once when the page loads, with a `nil` count, and again with the count once it arrives.
+- `count: false`: never counts. Pagination shows only previous/next navigation, and the `on_query_change` payload and controls slot have a `nil` total. This is the default of infinite pagination.
+
+```heex
+<Cinder.collection resource={MyApp.Event} actor={@current_user} pagination={[mode: :keyset, count: false]}>
+  ...
+</Cinder.collection>
+```
+
 **Pagination Modes:**
 
 - **Offset** (default): Traditional page numbers, allows jumping to any page. Can be slow on large datasets.
@@ -504,13 +518,7 @@ Individual collections can still override with the `page_size` attribute.
 
 **Total Counts:**
 
-Use the `count` attribute to control exact filtered totals independently from pagination:
-
-- `count={:sync}` waits for the exact count before rendering the page. This preserves the existing default for offset and keyset pagination.
-- `count={:async}` renders cursor navigation immediately from `more?`, then calculates and displays the exact total separately. The result is reused while navigating the same filtered query.
-- `count={false}` never calculates or displays an exact total. Previous/next and infinite sentinels use cursor state and `more?` instead.
-
-Infinite pagination defaults to `count={false}` because its loading and end states do not require a total. Set `count={:sync}` or `count={:async}` explicitly when an infinite collection needs the exact count. Offset and keyset pagination default to `count={:sync}` for backwards compatibility.
+The `count` option of `pagination` (see **Counting Records** above) controls exact filtered totals independently from the mode. Infinite pagination defaults to `count: false` because its loading and end states do not require a total; set `pagination={[mode: :infinite, count: true]}` or `count: :async` when an infinite collection needs the exact count. Offset and keyset pagination default to `count: true`.
 
 For infinite pagination, `page_size` remains the Ash query batch size. `overscan` controls how many additional batches are prefetched (default `1`). Every batch loaded stays rendered in the browser while the reader scrolls; nothing is dropped from either end. For example, `page_size={25}` and `overscan={1}` load 25 records per query and prefetch one batch. Cinder keeps cursor, page, ID, and selection metadata for the loaded rows, not the full record structs.
 
@@ -649,37 +657,6 @@ checkbox so it can still be deselected. The predicate is also enforced
 server-side, so tampering with the disabled checkboxes in the browser has no
 effect.
 
-### Selecting All Filtered Records
-
-Every selectable table, grid, and list renders a select-all control. It selects
-every selectable record matched by the collection's current query, filters, and
-search—not only the rendered page.
-
-For `selectable={true}`, Cinder records this as an `:all_matching` selection
-without fetching or retaining every matching ID. The existing `selected_ids`
-`MapSet` changes meaning in this mode: it contains only rows individually
-deselected afterward. Bulk actions receive the collection's trusted,
-server-built filtered query with those IDs excluded, so they operate on the
-current database state when executed.
-
-Infinite collections synchronize only the selected state of IDs in the bounded
-browser window. The browser patch therefore stays proportional to `window_size`,
-not the complete filtered selection.
-
-An arbitrary predicate such as `selectable={&(&1.status == :active)}` cannot be
-translated safely into an Ash query. Cinder therefore keeps the existing
-bounded-stream fallback for that form and materializes only the IDs accepted by
-the predicate. Use a filtered Ash read action together with `selectable={true}`
-when query-wide bulk performance matters.
-
-Pagination and sorting preserve selection. Changing the query, filters, or
-search clears an `:all_matching` selection because its scope changed. The
-select-all checkbox is checked while the whole query is selected and
-indeterminate when individual IDs have been excluded.
-
-The control inherits `select_all_container_class`, `selection_checkbox_class`,
-and `selection_indeterminate_class` from the active Cinder theme.
-
 ```heex
 <!-- Only active users can be selected -->
 <Cinder.collection
@@ -770,79 +747,6 @@ Add `confirm` to show a browser confirmation dialog. Use `{count}` to interpolat
 </:bulk_action>
 ```
 
-For an application-defined confirmation UI, set `confirmation={:slot}` and provide a
-`bulk_action_confirmation` slot. Preparation runs asynchronously. The slot is always
-rendered so applications can choose server-controlled or immediate client-controlled
-opening.
-
-```heex
-<Cinder.collection resource={MyApp.User} actor={@current_user} selectable>
-  <:col :let={user} field="name">{user.name}</:col>
-
-  <:bulk_action
-    action={:destroy}
-    confirmation={:slot}
-    prepare_confirmation={fn context -> MyApp.Users.labels(context.selected_ids) end}
-    :let={action}
-  >
-    <button type="button" phx-click={action.prepare}>
-      Delete
-    </button>
-  </:bulk_action>
-
-  <:bulk_action_confirmation :let={confirmation}>
-    <p :if={confirmation.active? and not confirmation.ready? and is_nil(confirmation.error)}>
-      Loading selected users…
-    </p>
-    <p :if={confirmation.error and not confirmation.ready?}>
-      The selected users could not be prepared for deletion.
-    </p>
-    <.modal
-      id="confirm-bulk-delete"
-      open={confirmation.ready?}
-      on_cancel={confirmation.cancel}
-    >
-      <p>Delete {confirmation.selected_count} selected users?</p>
-      <ul :if={confirmation.data}><li :for={label <- confirmation.data}>{label}</li></ul>
-      <p :if={confirmation.error}>The users could not be deleted.</p>
-      <button type="button" phx-click={confirmation.cancel}>Cancel</button>
-      <button type="button" disabled={not confirmation.ready?} phx-click={confirmation.confirm}>
-        Delete
-      </button>
-    </.modal>
-  </:bulk_action_confirmation>
-</Cinder.collection>
-```
-
-The bulk action context exposes `prepare`, which pushes preparation to Cinder and can
-be composed with any client-side `Phoenix.LiveView.JS` command. Applications may show
-a preparation surface immediately, but should derive the final confirmation's open
-state from `ready?` when it must open only after successful preparation.
-
-`prepare_confirmation` receives a map containing `selected_ids`, `selected_count`,
-and `action`. It may return `{:ok, data}`, `{:error, reason}`, `:ok` (equivalent to
-`{:ok, nil}`), or a plain value (equivalent to `{:ok, value}`). Raised exceptions are
-exposed as errors. Preparation runs asynchronously, so the selected IDs are
-snapshotted before the callback starts.
-
-Cinder accepts only one running preparation attempt per action slot. Repeated prepare
-events for that attempt are ignored. Cancelling invalidates the attempt, so a late
-result cannot overwrite a later attempt for the same action.
-
-The confirmation context contains `active?`, `ready?`, `selected_ids`,
-`selected_count`, `action`, `data`, `error`, `confirm`, and `cancel`. Both `confirm`
-and `cancel` are always valid commands, including while preparation is running. The
-application owns their presentation and may compose them with other
-`Phoenix.LiveView.JS` commands. `active?` becomes true when preparation starts and
-`ready?` becomes true after successful preparation. Cinder ignores confirmation
-attempts until `ready?` is true. When preparation or execution fails, `error` contains
-the reason; execution errors do not discard prepared `data`. Cinder clears the
-confirmation after successful execution or cancellation.
-
-For server-controlled opening, use a labeled bulk action. Cinder's themed button
-pushes preparation automatically; bind the modal's `open` attribute to
-`confirmation.active?`.
-
 ### Success and Error Callbacks
 
 Handle action results in your parent LiveView:
@@ -902,9 +806,8 @@ You can also track selection state in your parent LiveView. This is not necessar
 
 ```elixir
 def handle_info({:selection_changed, payload}, socket) do
-  # payload contains:
-  # %{selection_mode, selected_ids, selected_count, component_id, action}
-  # action is one of: :toggle, :select_all, :clear, :remove, :deselect
+  # payload contains: %{selected_ids, selected_count, component_id, action}
+  # action is one of: :select, :deselect, :select_all, :clear, :remove
   {:noreply, assign(socket, :selected_count, payload.selected_count)}
 end
 ```
@@ -924,8 +827,7 @@ The bulk action slot receives selection context:
 Available in `selection`:
 
 - `selected_count` - Number of selected items
-- `selection_mode` - `:explicit` or `:all_matching`
-- `selected_ids` - Selected IDs in `:explicit` mode; individually deselected IDs in `:all_matching` mode
+- `selected_ids` - MapSet of selected record IDs
 
 ### Click-to-Select
 
@@ -947,6 +849,7 @@ When `selectable` is enabled without a `click` handler, clicking rows/items togg
   ...
 </Cinder.collection>
 ```
+
 ## Synchronous v Asynchronous Initial Data Loading
 
 Cinder runs a collection's first query after the page renders, so the initial

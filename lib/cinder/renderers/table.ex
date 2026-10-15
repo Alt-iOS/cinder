@@ -29,10 +29,6 @@ defmodule Cinder.Renderers.Table do
       |> assign_new(:current_page, fn -> 1 end)
       |> assign(:selection_locked, Map.get(assigns, :selection_loading, false))
       |> assign(
-        :show_loading_state,
-        assigns.loading and not Map.get(assigns, :silent_refresh, false)
-      )
-      |> assign(
         :render_selected_ids,
         rendered_selected_ids(assigns)
       )
