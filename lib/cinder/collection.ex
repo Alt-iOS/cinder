@@ -269,7 +269,8 @@ defmodule Cinder.Collection do
 
   slot(:item,
     required: false,
-    doc: "Template for rendering each item (required for list/grid layouts)"
+    doc:
+      "Template for rendering each item (required for list/grid layouts). In a table, the row's cells: the table keeps the row and its selection cell"
   )
 
   slot(:filter,

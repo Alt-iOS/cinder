@@ -104,8 +104,14 @@ defmodule Cinder.Renderers.Table do
                   data-key="selection_checkbox_class"
                 />
               </td>
-              <td :for={column <- @columns} class={[@theme.td_class, column.class]} data-key="td_class">
-                <%!-- A self-closing `<:col field="..." />` has no content: show the field's value --%>
+              <%!-- An <:item> slot renders the row's cells itself; the columns then only head the table. --%>
+              {if item_cells?(assigns), do: render_slot(@item_slot, item)}
+              <td
+                :for={column <- @columns}
+                :if={not item_cells?(assigns)}
+                class={[@theme.td_class, column.class]}
+                data-key="td_class"
+              >
                 <%= if column.slot[:inner_block] do %>
                   {render_slot(column.slot, item)}
                 <% else %>
@@ -188,4 +194,7 @@ defmodule Cinder.Renderers.Table do
     base_count = length(columns)
     if Selection.enabled?(selectable), do: base_count + 1, else: base_count
   end
+
+  # Whether an <:item> slot renders each row's cells in place of one cell per column.
+  defp item_cells?(assigns), do: Map.get(assigns, :item_slot, []) != []
 end
