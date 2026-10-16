@@ -74,8 +74,8 @@ defmodule Cinder.Collection do
 
   | Attribute | Table | List | Grid | Description |
   |-----------|-------|------|------|-------------|
-  | `<:col>` content | ✅ Rendered | ❌ Ignored | ❌ Ignored | Cell content for table rows |
-  | `<:item>` slot | ❌ Ignored | ✅ Required | ✅ Required | Template for each item |
+  | `<:col>` content | ✅ Rendered, unless `<:item>` is given | ❌ Ignored | ❌ Ignored | Cell content for table rows |
+  | `<:item>` slot | ⚪ Optional: each row's cells | ✅ Required | ✅ Required | Template for each item |
   | `sort_label` | ❌ N/A | ✅ Button label | ✅ Button label | Label for sort button group |
   | `container_class` | ❌ N/A | ✅ Override | ✅ Override | Custom container CSS |
   | `grid_columns` | ❌ N/A | ❌ N/A | ✅ Column count | Number of grid columns |
@@ -333,7 +333,8 @@ defmodule Cinder.Collection do
 
   slot(:item,
     required: false,
-    doc: "Template for rendering each item (required for list/grid layouts)"
+    doc:
+      "Template for rendering each item (required for list/grid layouts). In a table, the row's cells: the table keeps the row and its selection cell"
   )
 
   slot(:filter,

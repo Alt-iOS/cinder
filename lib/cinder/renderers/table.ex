@@ -161,7 +161,14 @@ defmodule Cinder.Renderers.Table do
                   data-key="selection_checkbox_class"
                 />
               </td>
-              <td :for={column <- @columns} class={[@theme.td_class, column.class]} data-key="td_class" data-label={column.label}>
+              {if item_cells?(assigns), do: render_slot(@item_slot, payload.record)}
+              <td
+                :for={column <- @columns}
+                :if={not item_cells?(assigns)}
+                class={[@theme.td_class, column.class]}
+                data-key="td_class"
+                data-label={column.label}
+              >
                 {render_slot(column.slot, payload.record)}
               </td>
             </tr>
@@ -186,7 +193,15 @@ defmodule Cinder.Renderers.Table do
                   data-key="selection_checkbox_class"
                 />
               </td>
-              <td :for={column <- @columns} class={[@theme.td_class, column.class]} data-key="td_class" data-label={column.label}>
+              <%!-- An <:item> slot renders the row's cells itself; the columns then only head the table. --%>
+              {if item_cells?(assigns), do: render_slot(@item_slot, item)}
+              <td
+                :for={column <- @columns}
+                :if={not item_cells?(assigns)}
+                class={[@theme.td_class, column.class]}
+                data-key="td_class"
+                data-label={column.label}
+              >
                 {render_slot(column.slot, item)}
               </td>
             </tr>
@@ -301,4 +316,7 @@ defmodule Cinder.Renderers.Table do
     number_count = if show_item_numbers, do: 1, else: 0
     base_count + selection_count + number_count
   end
+
+  # Whether an <:item> slot renders each row's cells in place of one cell per column.
+  defp item_cells?(assigns), do: Map.get(assigns, :item_slot, []) != []
 end
