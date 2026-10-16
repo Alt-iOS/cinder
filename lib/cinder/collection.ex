@@ -827,6 +827,10 @@ defmodule Cinder.Collection do
         search: false
       }
 
+      # The slot's label names what the filter infers from it, such as a select's prompt
+      column_config =
+        if label, do: Map.put(column_config, :label, label), else: column_config
+
       column_config =
         case determined_filter_type do
           :auto ->
