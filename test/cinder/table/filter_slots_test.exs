@@ -430,6 +430,21 @@ defmodule Cinder.Table.FilterSlotsTest do
       # but testing that would require more complex HTML parsing
     end
 
+    test "names a select's default prompt with the slot's label" do
+      filter_slots = [
+        %{field: "department", type: :select, label: "Team", __slot__: :filter},
+        %{field: "email", type: :select, __slot__: :filter}
+      ]
+
+      processed = Cinder.Table.process_filter_slots(filter_slots, TestUser)
+
+      team_filter = Enum.find(processed, &(&1.field == "department"))
+      assert Keyword.get(team_filter.filter_options, :prompt) =~ "Team"
+
+      email_filter = Enum.find(processed, &(&1.field == "email"))
+      assert Keyword.get(email_filter.filter_options, :prompt) =~ "Email"
+    end
+
     test "auto-generates labels from field names" do
       filter_slots = [
         %{field: "created_at", type: :date_range, __slot__: :filter},
