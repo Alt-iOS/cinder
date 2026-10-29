@@ -39,6 +39,13 @@ defmodule Cinder.Update do
         end)}
       end
 
+  Updates and removals made during a data read are reconciled onto its result.
+  The latest replacement for each updated row wins if that row is still in the
+  returned page; rows absent from that page are not inserted. Removed rows stay
+  removed. Callbacks run only once, and row changes do not restart the read, so
+  reads can finish even under continuous updates. This protection lasts for the
+  active read only; persist changes if they must survive future reads.
+
   ## Caveats
 
   - These functions modify in-memory data only. Computed fields, aggregates,

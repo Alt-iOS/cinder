@@ -56,7 +56,7 @@ defmodule Cinder.LiveComponent do
         if Map.get(item, id_field) == id, do: update_fn.(item), else: item
       end)
 
-    {:ok, assign(socket, :data, updated_data)}
+    {:ok, assign_updated_data(socket, updated_data, [id])}
   end
 
   def update(%{__update_items__: {ids, update_fn}}, socket) do
@@ -68,7 +68,7 @@ defmodule Cinder.LiveComponent do
         if Map.get(item, id_field) in id_set, do: update_fn.(item), else: item
       end)
 
-    {:ok, assign(socket, :data, updated_data)}
+    {:ok, assign_updated_data(socket, updated_data, ids)}
   end
 
   def update(%{__remove_items__: ids}, socket) when is_list(ids) do
@@ -87,7 +87,7 @@ defmodule Cinder.LiveComponent do
 
     socket =
       socket
-      |> assign(:data, updated_data)
+      |> assign_updated_data(updated_data, [], ids)
       |> assign(:selected_ids, updated_selected_ids)
       |> assign(:page, drop_removed_from_page(socket.assigns[:page], updated_data, removed))
       |> update(:total_count, &(&1 && max(&1 - removed, 0)))
@@ -176,6 +176,31 @@ defmodule Cinder.LiveComponent do
     end
   end
 
+  defp assign_updated_data(socket, data, updated_ids, removed_ids \\ []) do
+    socket =
+      if socket.assigns[:__load_data_pending__] == true do
+        id_field = socket.assigns[:id_field] || :id
+        ids = MapSet.new(updated_ids)
+
+        updates =
+          socket.assigns.data
+          |> Enum.zip(data)
+          |> Enum.filter(fn {old, _new} -> MapSet.member?(ids, Map.get(old, id_field)) end)
+          |> Map.new(fn {old, new} -> {to_string(Map.get(old, id_field)), {:updated, new}} end)
+
+        changes =
+          socket.assigns.__load_data_changes__
+          |> Map.merge(updates)
+          |> Map.merge(Map.new(removed_ids, &{to_string(&1), :removed}))
+
+        assign(socket, :__load_data_changes__, changes)
+      else
+        socket
+      end
+
+    assign(socket, :data, data)
+  end
+
   defp do_update_item_if_visible(socket, id, raw_item, update_fn, id_field) do
     data = socket.assigns.data || []
 
@@ -187,7 +212,7 @@ defmodule Cinder.LiveComponent do
         input = raw_item || old_item
         updated = update_fn.(input)
         updated_data = Enum.map(data, &if(Map.get(&1, id_field) == id, do: updated, else: &1))
-        {:ok, assign(socket, :data, updated_data)}
+        {:ok, assign_updated_data(socket, updated_data, [id])}
     end
   end
 
@@ -214,7 +239,7 @@ defmodule Cinder.LiveComponent do
           Map.get(updated_by_id, id, item)
         end)
 
-      {:ok, assign(socket, :data, updated_data)}
+      {:ok, assign_updated_data(socket, updated_data, Map.keys(updated_by_id))}
     end
   end
 
@@ -701,21 +726,32 @@ defmodule Cinder.LiveComponent do
 
   # A removal that empties the page reads it again, so the following rows move up
   # instead of the empty state showing. If the emptied page was the last offset page,
-  # step back to the one before it.
+  # step back to the one before it. Keyset pages restart without cursors so rows
+  # before the emptied page remain reachable.
   defp reload_emptied_page(socket) do
     %{pagination_mode: mode, current_page: current_page, page_size: page_size} =
       socket.assigns
 
     remaining = socket.assigns[:total_count]
 
-    if mode == :offset and current_page > 1 and is_integer(remaining) and
-         remaining <= (current_page - 1) * page_size do
-      socket
-      |> assign(:current_page, current_page - 1)
-      |> load_data()
-      |> notify_state_change()
-    else
-      load_data(socket)
+    cond do
+      mode == :keyset ->
+        socket
+        |> assign(:after_keyset, nil)
+        |> assign(:before_keyset, nil)
+        |> assign(:current_page, 1)
+        |> load_data()
+        |> notify_state_change()
+
+      mode == :offset and current_page > 1 and is_integer(remaining) and
+          remaining <= (current_page - 1) * page_size ->
+        socket
+        |> assign(:current_page, current_page - 1)
+        |> load_data()
+        |> notify_state_change()
+
+      true ->
+        load_data(socket)
     end
   end
 
@@ -830,15 +866,27 @@ defmodule Cinder.LiveComponent do
   end
 
   defp handle_result({:ok, page}, socket) do
-    socket
-    |> store_page_count(page)
-    |> assign(:loading, false)
-    |> assign(:silent, false)
-    |> assign(:error, false)
-    |> assign(:data, page.results)
-    |> assign(:page, page)
-    # Update keyset cursors for navigation (only read in keyset mode)
-    |> update_keyset_cursors(page)
+    # Navigation belongs to the query's page, even when its last row was removed.
+    socket = update_keyset_cursors(socket, page)
+    incoming_results = page.results
+    page = reconcile_page(page, socket)
+
+    socket =
+      socket
+      |> assign(:__load_data_pending__, false)
+      |> assign(:__load_data_changes__, %{})
+      |> store_page_count(page)
+      |> assign(:loading, false)
+      |> assign(:silent, false)
+      |> assign(:error, false)
+      |> assign(:data, page.results)
+      |> assign(:page, page)
+
+    if incoming_results != [] and page.results == [] do
+      reload_emptied_page(socket)
+    else
+      socket
+    end
   end
 
   defp handle_result({:error, error}, socket) do
@@ -871,7 +919,34 @@ defmodule Cinder.LiveComponent do
     handle_load_error(socket)
   end
 
+  defp reconcile_page(page, socket) do
+    changes = socket.assigns[:__load_data_changes__] || %{}
+    id_field = socket.assigns[:id_field] || :id
+
+    results =
+      Enum.flat_map(page.results, fn item ->
+        case Map.get(changes, to_string(Map.get(item, id_field))) do
+          :removed -> []
+          {:updated, replacement} -> [replacement]
+          nil -> [item]
+        end
+      end)
+
+    removed = length(page.results) - length(results)
+    page = %{page | results: results}
+
+    case page do
+      %{count: count} when is_integer(count) -> %{page | count: max(count - removed, 0)}
+      _ -> page
+    end
+  end
+
   defp handle_load_error(socket) do
+    socket =
+      socket
+      |> assign(:__load_data_pending__, false)
+      |> assign(:__load_data_changes__, %{})
+
     if socket.assigns.silent do
       socket
       |> assign(:loading, false)
@@ -1248,6 +1323,8 @@ defmodule Cinder.LiveComponent do
     ]
 
     socket
+    |> assign(:__load_data_pending__, true)
+    |> assign(:__load_data_changes__, %{})
     |> assign(:loading, true)
     |> assign(:silent, silent)
     |> assign(:error, false)
