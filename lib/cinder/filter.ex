@@ -412,8 +412,19 @@ defmodule Cinder.Filter do
       "profile__first_name"
   """
   def sanitized_field_name(field_name) do
-    field_name
-    |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+    # Every filter of every list asks on every render, always for the same few names, so each
+    # is worked out once and kept.
+    key = {__MODULE__, :sanitized_field_name, field_name}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        sanitized = String.replace(field_name, ~r/[^a-zA-Z0-9_-]/, "_")
+        :persistent_term.put(key, sanitized)
+        sanitized
+
+      sanitized ->
+        sanitized
+    end
   end
 
   @doc """
