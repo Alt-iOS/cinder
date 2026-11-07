@@ -1,11 +1,14 @@
-defmodule Cinder.Column do
-  @moduledoc """
-  Column configuration and type inference for Cinder table components.
+# SPDX-FileCopyrightText: 2025 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
 
-  Provides intelligent column parsing that can automatically infer filter types,
-  sort capabilities, and display options from Ash resource definitions.
-  Supports relationship fields using dot notation (e.g., "user.name").
-  """
+defmodule Cinder.Column do
+  @moduledoc false
+  # Column configuration and type inference for Cinder table components.
+  #
+  # Parses columns, inferring filter types,
+  # sort capabilities, and display options from Ash resource definitions.
+  # Supports relationship fields using dot notation (e.g., "user.name").
 
   require Logger
 
@@ -46,22 +49,6 @@ defmodule Cinder.Column do
     :sort_warning,
     :filter_warning
   ]
-
-  @doc """
-  Parses and normalizes column definitions from slots and resource information.
-
-  ## Parameters
-  - `slots` - List of column slot definitions
-  - `resource` - Ash resource module for type inference
-
-  ## Returns
-  List of normalized Column structs
-  """
-  def parse_columns(slots, resource) when is_list(slots) do
-    Enum.map(slots, fn slot ->
-      parse_column(slot, resource)
-    end)
-  end
 
   @doc """
   Parses a single column definition with automatic type inference.
@@ -105,21 +92,20 @@ defmodule Cinder.Column do
       # Check if this field is a non-filterable calculation
       {filterable, filter_warning} = determine_filterability(resource, field, slot)
 
-      # Log warnings if calculation has issues
-      if sort_warning do
-        require Logger
-        Logger.info("Cinder Column: #{sort_warning}")
-      end
-
-      if filter_warning do
-        require Logger
-        Logger.info("Cinder Column: #{filter_warning}")
-      end
+      # A column asking for sorting or filtering it can't have. A warning for now: these
+      # become errors in 1.0
+      if sort_warning, do: Logger.warning("Cinder Column: #{sort_warning}")
+      if filter_warning, do: Logger.warning("Cinder Column: #{filter_warning}")
 
       # Create column struct
       %__MODULE__{
         field: field,
-        label: Map.get(merged_config, :label, humanize_key(field)),
+        label:
+          Map.get(
+            merged_config,
+            :label,
+            Cinder.Filter.Helpers.humanize_embedded_field(to_string(field))
+          ),
         sortable: sortable,
         filterable: filterable,
         filter_type: Map.get(merged_config, :filter_type, :text),
@@ -192,40 +178,6 @@ defmodule Cinder.Column do
   end
 
   @doc """
-  Validates a column configuration.
-  """
-  def validate(%__MODULE__{} = column) do
-    errors = []
-
-    errors = if column.field in [nil, ""], do: ["Field cannot be empty" | errors], else: errors
-    errors = if column.label in [nil, ""], do: ["Label cannot be empty" | errors], else: errors
-
-    # Validate filter type
-    valid_filter_types = [
-      :text,
-      :select,
-      :multi_select,
-      :multi_checkboxes,
-      :boolean,
-      :checkbox,
-      :date_range,
-      :number_range
-    ]
-
-    errors =
-      if column.filter_type in valid_filter_types do
-        errors
-      else
-        ["Invalid filter type: #{column.filter_type}" | errors]
-      end
-
-    case errors do
-      [] -> {:ok, column}
-      _ -> {:error, Enum.reverse(errors)}
-    end
-  end
-
-  @doc """
   Merges slot configuration with inferred defaults.
   """
   def merge_config(slot, inferred) do
@@ -286,22 +238,13 @@ defmodule Cinder.Column do
     }
   end
 
-  defp humanize_key(field) when is_binary(field) do
-    field
-    |> String.replace("_", " ")
-    |> String.replace(".", " > ")
-    |> String.split()
-    |> Enum.map_join(" ", &String.capitalize/1)
-  end
-
-  defp humanize_key(field), do: humanize_key(to_string(field))
-
   # Extracts the resource from either an Ash.Query struct or a resource module.
   # This allows the column parsing to work with both queries and resource modules.
   defp extract_resource_from_query_or_resource(%Ash.Query{resource: resource}), do: resource
   defp extract_resource_from_query_or_resource(resource) when is_atom(resource), do: resource
   defp extract_resource_from_query_or_resource(other), do: other
 
+  # Replaced by `Cinder.Engine.field/2`: remove with the old shell
   defp determine_sortability(resource_or_query, field, slot) do
     # Extract the actual resource from query or resource
     resource = extract_resource_from_query_or_resource(resource_or_query)
@@ -320,7 +263,7 @@ defmodule Cinder.Column do
 
       true ->
         # User explicitly wants sorting - check if it's possible
-        {auto_sortable, auto_warning} = determine_auto_sortability(resource, field)
+        {auto_sortable, auto_warning} = queryable(resource, field, "sorted")
 
         if auto_sortable do
           # User wants to enable sorting on something that can be sorted - OK
@@ -333,38 +276,8 @@ defmodule Cinder.Column do
     end
   end
 
-  # Determines sortability based purely on the field's nature (ignoring user overrides)
-  defp determine_auto_sortability(resource, field) do
-    # Validate field existence first using comprehensive validation
-    if Cinder.QueryBuilder.validate_field_existence(resource, field) do
-      # Parse field to handle relationship calculations
-      {target_resource, target_field} =
-        Cinder.QueryBuilder.resolve_field_resource(resource, field)
-
-      # Check if this field is a calculation on the target resource
-      case Cinder.QueryBuilder.get_calculation_info(target_resource, target_field) do
-        nil ->
-          # Not a calculation, should be sortable
-          {true, nil}
-
-        calc ->
-          if Cinder.QueryBuilder.calculation_sortable?(calc) do
-            {true, nil}
-          else
-            warning =
-              "Field '#{field}' is an in-memory calculation and cannot be sorted. " <>
-                "Consider using expr() for database-level calculations that support sorting."
-
-            {false, warning}
-          end
-      end
-    else
-      warning = "Field '#{field}' does not exist on #{inspect(resource)}."
-      {false, warning}
-    end
-  end
-
-  # Determines filterability based on field nature and user intent
+  # Determines filterability based on field nature and user intent.
+  # Replaced by `Cinder.Engine.field/2`: remove with the old shell
   defp determine_filterability(resource_or_query, field, slot) do
     # Extract the actual resource from query or resource
     resource = extract_resource_from_query_or_resource(resource_or_query)
@@ -391,7 +304,7 @@ defmodule Cinder.Column do
           {true, nil}
         else
           # User explicitly wants filtering - check if it's possible
-          {auto_filterable, auto_warning} = determine_auto_filterability(resource, field)
+          {auto_filterable, auto_warning} = queryable(resource, field, "filtered")
 
           if auto_filterable do
             # User wants filtering on something that can be filtered - OK
@@ -405,35 +318,20 @@ defmodule Cinder.Column do
     end
   end
 
-  # Determines filterability based purely on the field's nature (ignoring user overrides)
-  defp determine_auto_filterability(resource, field) do
-    # Validate field existence first using comprehensive validation
-    if Cinder.QueryBuilder.validate_field_existence(resource, field) do
-      # Parse field to handle relationship calculations
-      {target_resource, target_field} =
-        Cinder.QueryBuilder.resolve_field_resource(resource, field)
-
-      # Check if this field is a calculation on the target resource
-      case Cinder.QueryBuilder.get_calculation_info(target_resource, target_field) do
-        nil ->
-          # Not a calculation, should be filterable
-          {true, nil}
-
-        calc ->
-          if Cinder.QueryBuilder.calculation_sortable?(calc) do
-            # Database-level calculations can be filtered
-            {true, nil}
-          else
-            warning =
-              "Field '#{field}' is an in-memory calculation and cannot be filtered. " <>
-                "Consider using expr() for database-level calculations that support filtering."
-
-            {false, warning}
-          end
+  # Whether a column can be sorted or filtered by its field, with the reason if not. With no
+  # Ash resource there.s nothing to check against, so it.s allowed
+  @doc false
+  def queryable(resource, field, verb) do
+    if is_atom(resource) and resource != nil and Ash.Resource.Info.resource?(resource) do
+      with {:ok, resolved} <- Cinder.Field.resolve(resource, field),
+           nil <- Cinder.Field.query_error(resolved) do
+        {true, nil}
+      else
+        :error -> {false, "Field '#{field}' does not exist on #{inspect(resource)}."}
+        reason -> {false, "Field '#{field}' #{reason}, so it can't be #{verb}."}
       end
     else
-      warning = "Field '#{field}' does not exist on #{inspect(resource)}."
-      {false, warning}
+      {true, nil}
     end
   end
 end

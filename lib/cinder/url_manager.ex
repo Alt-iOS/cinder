@@ -1,10 +1,16 @@
-defmodule Cinder.UrlManager do
-  @moduledoc """
-  URL state management for Cinder table components.
+# SPDX-FileCopyrightText: 2025 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
 
-  Handles encoding and decoding of table state (filters, pagination, sorting)
-  to/from URL parameters for browser history and bookmark support.
-  """
+defmodule Cinder.UrlManager do
+  @moduledoc false
+  # URL state management for Cinder table components: encoding and decoding table state
+  # (filters, pagination, sorting) to/from URL parameters. Internal: the shell goes
+  # through `Cinder.Params`.
+
+  require Logger
+
+  @max_page 1_000_000
 
   @type filter_value ::
           String.t()
@@ -40,7 +46,8 @@ defmodule Cinder.UrlManager do
   def encode_state(%{filters: filters, sort_by: sort_by} = state) do
     encoded_filters = encode_filters(filters)
 
-    # Keyset and infinite pagination store their cursor; offset pagination its page number.
+    # Handle pagination state based on mode
+    # For keyset pagination, we store after/before cursors; for offset, we store page number
     state_with_page =
       cond do
         # Keyset pagination with after cursor
@@ -53,7 +60,13 @@ defmodule Cinder.UrlManager do
 
         # Offset pagination - store page number
         true ->
-          maybe_put_page(encoded_filters, state)
+          current_page = Map.get(state, :current_page, 1)
+
+          if current_page > 1 do
+            Map.put(encoded_filters, :page, to_string(current_page))
+          else
+            encoded_filters
+          end
       end
 
     # Add page_size if different from default
@@ -95,16 +108,6 @@ defmodule Cinder.UrlManager do
     end
   end
 
-  defp maybe_put_page(params, state) do
-    case Map.get(state, :current_page, 1) do
-      current_page when is_integer(current_page) and current_page > 1 ->
-        Map.put(params, :page, to_string(current_page))
-
-      _ ->
-        params
-    end
-  end
-
   @doc """
   Decodes URL parameters into table state components.
 
@@ -117,9 +120,15 @@ defmodule Cinder.UrlManager do
       iex> columns = [%{field: "title", filterable: true, filter_type: :text}]
       iex> Cinder.UrlManager.decode_state(url_params, columns)
       %{
-        filters: %{"title" => %{type: :text, value: "test", operator: :contains}},
+        filters: %{
+          "title" => %{type: :text, value: "test", operator: :contains, case_sensitive: false}
+        },
         current_page: 2,
-        sort_by: [{"title", :desc}]
+        sort_by: [{"title", :desc}],
+        page_size: 25,
+        search_term: "",
+        after: nil,
+        before: nil
       }
 
   """
@@ -151,29 +160,39 @@ defmodule Cinder.UrlManager do
   - Others: string representation
   """
   def encode_filters(filters) when is_map(filters) do
-    filters
-    |> Enum.map(fn {key, filter} ->
-      encoded_value =
-        case filter.type do
-          :multi_select when is_list(filter.value) ->
-            Enum.join(filter.value, ",")
+    for {key, filter} <- filters, {:ok, value} <- [encode_filter(key, filter)], into: %{} do
+      {Cinder.Filter.Helpers.declared_field_atom(key), value}
+    end
+  end
 
-          :multi_checkboxes when is_list(filter.value) ->
-            Enum.join(filter.value, ",")
+  defp encode_filter(_key, %{type: :date_range, value: %{from: from, to: to}}),
+    do: {:ok, "#{from},#{to}"}
 
-          :date_range ->
-            "#{filter.value.from},#{filter.value.to}"
+  defp encode_filter(_key, %{type: :number_range, value: %{min: min, max: max}}),
+    do: {:ok, "#{min},#{max}"}
 
-          :number_range ->
-            "#{filter.value.min},#{filter.value.max}"
+  defp encode_filter(key, %{type: type, value: value}) do
+    cond do
+      is_list(value) and Enum.all?(value, &url_scalar?/1) -> {:ok, Enum.join(value, ",")}
+      url_scalar?(value) -> {:ok, to_string(value)}
+      true -> unencodable(key, type)
+    end
+  end
 
-          _ ->
-            to_string(filter.value)
-        end
+  # Lists implement `String.Chars` as charlists, so they're handled above, not as scalars
+  defp url_scalar?(value), do: not is_list(value) and String.Chars.impl_for(value) != nil
 
-      {String.to_atom(key), encoded_value}
-    end)
-    |> Enum.into(%{})
+  # A custom filter's value only exists once a user applies it, so this can't be caught
+  # earlier; leaving it out of the URL keeps the user's page working. The value itself
+  # isn't logged, as it may be sensitive.
+  defp unencodable(key, type) do
+    Logger.error(
+      "Cinder can't keep the #{inspect(key)} filter (type #{inspect(type)}) in the URL: its " <>
+        "value must be a string, number, atom, or a list of them. It still applies, but is " <>
+        "left out of the URL."
+    )
+
+    :error
   end
 
   @doc """
@@ -191,15 +210,12 @@ defmodule Cinder.UrlManager do
       if column && column.filterable && value != "" do
         filter_type = column.filter_type
 
-        # Preprocess URL values for specific filter types
-        processed_value = preprocess_url_value(value, filter_type)
-
-        # Use filter module's process/2 function to properly decode the value
+        # Each type parses its own URL value (a range's "min,max", a multi-select's "a,b")
         filter_module = Cinder.Filters.Registry.get_filter(filter_type)
 
         if filter_module do
           try do
-            decoded_filter = filter_module.process(processed_value, column)
+            decoded_filter = filter_module.process(value, column)
 
             if decoded_filter do
               Map.put(acc, string_key, decoded_filter)
@@ -208,8 +224,6 @@ defmodule Cinder.UrlManager do
             end
           rescue
             error ->
-              require Logger
-
               Logger.error(
                 "Error processing URL filter value for #{filter_type}: #{inspect(error)}. " <>
                   "Skipping invalid filter."
@@ -218,7 +232,6 @@ defmodule Cinder.UrlManager do
               acc
           end
         else
-          require Logger
           Logger.warning("Unknown filter type: #{filter_type}. Skipping filter.")
           acc
         end
@@ -226,19 +239,6 @@ defmodule Cinder.UrlManager do
         acc
       end
     end)
-  end
-
-  # Preprocesses URL values based on filter type before passing to filter modules
-  defp preprocess_url_value(value, filter_type) do
-    case filter_type do
-      type when type in [:multi_select, :multi_checkboxes] ->
-        # Split comma-separated values for multi-select filters
-        String.split(value, ",")
-
-      _ ->
-        # For other types, use the value as-is
-        value
-    end
   end
 
   @doc """
@@ -273,8 +273,6 @@ defmodule Cinder.UrlManager do
         end
       end)
     else
-      require Logger
-
       Logger.warning(
         "Invalid sort_by format in encode_sort: #{inspect(sort_by)}. Expected list of {field, direction} tuples."
       )
@@ -286,37 +284,41 @@ defmodule Cinder.UrlManager do
   @doc """
   Decodes sort string from URL parameters.
 
-  Parses Ash sort string format into sort tuples.
-  Fields prefixed with "-" are descending, others are ascending.
+  Parses Ash sort string format into sort tuples, keeping only the fields of sortable
+  columns. Fields prefixed with "-" are descending, others are ascending.
 
   ## Examples
 
-      iex> Cinder.UrlManager.decode_sort("-title,created_at")
+      iex> columns = [%{field: "title"}, %{field: "created_at"}]
+      iex> Cinder.UrlManager.decode_sort("-title,created_at,secret", columns)
       [{"title", :desc}, {"created_at", :asc}]
 
-      iex> Cinder.UrlManager.decode_sort("--payment_date,++created_at")
+      iex> columns = [%{field: "payment_date"}, %{field: "created_at"}]
+      iex> Cinder.UrlManager.decode_sort("--payment_date,++created_at", columns)
       [{"payment_date", :desc_nils_last}, {"created_at", :asc_nils_first}]
 
-      iex> Cinder.UrlManager.decode_sort("-+score,+-priority")
+      iex> columns = [%{field: "score"}, %{field: "priority"}]
+      iex> Cinder.UrlManager.decode_sort("-+score,+-priority", columns)
       [{"score", :asc_nils_last}, {"priority", :desc_nils_first}]
 
   """
-  def decode_sort(nil, _columns), do: []
-  def decode_sort("", _columns), do: []
-
   def decode_sort(url_sort, columns) when is_binary(url_sort) and is_list(columns) do
     url_sort
     |> parse_sort_string()
     |> filter_valid_sorts(columns)
   end
 
-  # Backward compatibility - if called without columns, parse but don't validate
-  def decode_sort(nil), do: []
-  def decode_sort(""), do: []
+  def decode_sort(nil, _columns), do: []
+  def decode_sort("", _columns), do: []
 
-  def decode_sort(url_sort) when is_binary(url_sort) do
-    parse_sort_string(url_sort)
-  end
+  @doc false
+  @deprecated "Use decode_sort/2 instead"
+  def decode_sort(url_sort), do: parse_sort(url_sort)
+
+  # For callers without columns yet, who must check the fields before applying the sort
+  @doc false
+  def parse_sort(nil), do: []
+  def parse_sort(url_sort) when is_binary(url_sort), do: parse_sort_string(url_sort)
 
   # Helper function to parse sort string into {field, direction} tuples
   defp parse_sort_string(url_sort) do
@@ -358,14 +360,10 @@ defmodule Cinder.UrlManager do
   end
 
   # Helper function to filter sorts based on column definitions
+  # Only declared sortable columns: a URL's sort is client input, so anything else
+  # (including everything, when there are no columns) is dropped rather than applied
   defp filter_valid_sorts(sorts, columns) do
-    if Enum.empty?(columns) do
-      sorts
-    else
-      Enum.filter(sorts, fn {field, _direction} ->
-        field_sortable?(field, columns)
-      end)
-    end
+    Enum.filter(sorts, fn {field, _direction} -> field_sortable?(field, columns) end)
   end
 
   # Helper function to check if a field is sortable
@@ -380,7 +378,8 @@ defmodule Cinder.UrlManager do
   @doc """
   Decodes page number from URL parameter.
 
-  Returns 1 for invalid or missing page parameters.
+  Returns 1 for invalid or missing page parameters, and caps the page at
+  1,000,000.
 
   ## Examples
 
@@ -394,9 +393,12 @@ defmodule Cinder.UrlManager do
       1
 
   """
-  def decode_page(page_param) when is_binary(page_param) do
+  # A page becomes the query's offset, so a client-supplied one is bounded: past
+  # @max_page it's capped (an empty page past the end, like any too-large page), and a
+  # number too long to be a page isn't parsed at all
+  def decode_page(page_param) when is_binary(page_param) and byte_size(page_param) <= 20 do
     case Integer.parse(page_param) do
-      {page, ""} when page > 0 -> page
+      {page, ""} when page > 0 -> min(page, @max_page)
       _ -> 1
     end
   end
@@ -490,12 +492,8 @@ defmodule Cinder.UrlManager do
     end)
   end
 
-  @doc """
-  Validates URL parameters for potential security issues.
-
-  Performs basic validation to ensure URL parameters are safe to process.
-  Returns {:ok, params} for valid parameters or {:error, reason} for invalid ones.
-  """
+  @doc false
+  @deprecated "Unused by Cinder, and removed in 1.0: URL params are bounded where they're decoded"
   def validate_url_params(params) when is_map(params) do
     # Basic validation - check for reasonable parameter sizes
     max_param_length = 1000

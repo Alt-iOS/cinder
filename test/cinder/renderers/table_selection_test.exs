@@ -58,23 +58,6 @@ defmodule Cinder.Renderers.TableSelectionTest do
   end
 
   describe "table selection rendering" do
-    test "renders stable visible keyset item numbers when enabled" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          show_item_numbers: true,
-          pagination_mode: :keyset,
-          current_page: 3,
-          page: %{limit: 10},
-          data: [%{id: "user-1", name: "Alice"}, %{id: "user-2", name: "Bob"}]
-        })
-
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ ~r/data-item-number[^>]*>\s*21\s*</
-      assert html =~ ~r/data-item-number[^>]*>\s*22\s*</
-    end
-
     test "renders header checkbox with theme class when selectable=true" do
       assigns =
         base_assigns()
@@ -82,67 +65,9 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~s(phx-click="toggle_select_all")
+      assert html =~ ~s(phx-click="toggle_select_all_page")
       # Selection header uses th_class with w-10 width
       assert html =~ "test-th-class"
-
-      refute html =~
-               ~r/<label[^>]*class="[^"]*mb-3[^"]*"[^>]*data-key="select_all_container_class"/
-    end
-
-    test "supports visible-page select all" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          selectable: true,
-          select_all: :page,
-          select_all_label: "Select all visible items",
-          data: [%{id: "user-1", name: "Alice"}]
-        })
-
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ ~s(phx-click="toggle_select_all_page")
-      refute html =~ ~s(phx-click="toggle_select_all")
-    end
-
-    test "can hide select all without hiding individual selection" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          selectable: true,
-          select_all: false,
-          data: [%{id: "user-1", name: "Alice"}]
-        })
-
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      refute html =~ "toggle_select_all"
-      assert html =~ ~s(phx-click="toggle_select")
-    end
-
-    test "uses the complete filtered scope for checked and indeterminate state" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          selectable: true,
-          data: [%{id: "user-1", name: "Alice"}],
-          selection_scope_ids: MapSet.new(["user-1", "user-2"]),
-          selected_ids: MapSet.new(["user-1"])
-        })
-
-      html = render_component(&TableRenderer.render/1, assigns)
-      assert html =~ ~s(data-selection-state="some")
-      assert html =~ ~s(data-key="select_all_container_class")
-      assert html =~ ~s(data-key="selection_indeterminate_class")
-
-      checked_html =
-        render_component(
-          &TableRenderer.render/1,
-          Map.put(assigns, :selected_ids, MapSet.new(["user-1", "user-2"]))
-        )
-
-      assert checked_html =~ ~s(data-selection-state="all")
     end
 
     test "renders row checkboxes with correct attributes when selectable=true" do
@@ -165,13 +90,6 @@ defmodule Cinder.Renderers.TableSelectionTest do
       assert html =~ "test-checkbox-class"
     end
 
-    test "each cell is named after its column, for a theme showing cells apart from the header" do
-      assigns = Map.put(base_assigns(), :data, [%{id: "user-1", name: "Alice"}])
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ ~s(data-label="Name")
-    end
-
     test "does not render selection elements when selectable=false" do
       assigns =
         base_assigns()
@@ -181,7 +99,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       # No selection checkboxes or events should be rendered
       refute html =~ "toggle_select"
-      refute html =~ "toggle_select_all"
+      refute html =~ "toggle_select_all_page"
       refute html =~ "test-checkbox-class"
     end
 
@@ -212,48 +130,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all"/
-    end
-
-    test "header checkbox exposes an indeterminate state when some visible items are selected" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          selectable: true,
-          selected_ids: MapSet.new(["user-1"]),
-          data: [%{id: "user-1", name: "Alice"}, %{id: "user-2", name: "Bob"}]
-        })
-
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ ~s(aria-checked="mixed")
-      assert html =~ ~s(data-selection-state="some")
-      assert html =~ ~r/\sdata-indeterminate(?:\s|>)/
-    end
-
-    test "header checkbox is disabled while loading stale page data" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{selectable: true, loading: true, data: [%{id: "user-1", name: "Alice"}]})
-
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select_all"/
-    end
-
-    test "disables row selection while query-wide select all is loading" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          selectable: true,
-          selection_loading: true,
-          data: [%{id: "user-1", name: "Alice"}]
-        })
-
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select"/
-      refute html =~ ~s(phx-click="[[\"push\",{\"event\":\"toggle_select\")
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
 
     test "row checkbox reflects selection state" do
@@ -291,7 +168,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
     test "renders the selection column header when a predicate is given" do
       html = render_component(&TableRenderer.render/1, predicate_assigns())
 
-      assert html =~ ~s(phx-click="toggle_select_all")
+      assert html =~ ~s(phx-click="toggle_select_all_page")
     end
 
     test "renders an enabled checkbox for selectable rows and a disabled one otherwise" do
@@ -317,35 +194,12 @@ defmodule Cinder.Renderers.TableSelectionTest do
       refute html =~ ~r/<input[^>]*disabled[^>]*phx-value-id="user-2"/
     end
 
-    test "keeps an already-selected infinite row toggleable when it becomes non-selectable" do
-      record = %{id: "user-2", name: "Bob", status: :inactive}
-
-      assigns =
-        predicate_assigns()
-        |> Map.merge(%{
-          pagination_mode: :infinite,
-          data: [],
-          selected_ids: MapSet.new(["user-2"]),
-          streams: %{
-            items: [
-              {"test-table-items-user-2",
-               %{record: record, id: "user-2", number: 2, selectable?: false}}
-            ]
-          }
-        })
-
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ ~r/<input[^>]*checked[^>]*phx-value-id="user-2"/
-      refute html =~ ~r/<input[^>]*disabled[^>]*phx-value-id="user-2"/
-    end
-
     test "header checkbox is checked when all selectable rows are selected" do
       assigns = Map.put(predicate_assigns(), :selected_ids, MapSet.new(["user-1"]))
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all"/
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
 
     test "header checkbox is unchecked when there are no selectable rows" do
@@ -360,15 +214,29 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      refute html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all"/
+      refute html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
+  end
 
-    test "applies selected styling only to selectable selected rows" do
-      assigns = Map.put(predicate_assigns(), :selected_ids, MapSet.new(["user-1"]))
+  test "table row numbers follow offset and cursor page positions" do
+    for {page, current, expected} <- [
+          {%Ash.Page.Offset{offset: 10, limit: 10, results: [], more?: false}, 1, "11"},
+          {%Ash.Page.Keyset{limit: 10, results: [], more?: false}, 3, "21"}
+        ] do
+      html =
+        render_component(
+          &TableRenderer.render/1,
+          base_assigns()
+          |> Map.merge(%{
+            show_item_numbers: true,
+            current_page: current,
+            page: page,
+            data: [%{id: "one", name: "One"}]
+          })
+        )
 
-      html = render_component(&TableRenderer.render/1, assigns)
-
-      assert html =~ "test-selected-row"
+      assert html =~ ~s(id="test-table-items")
+      assert html =~ ~r/data-item-number[^>]*>\s*#{expected}\s*<\/td>/
     end
   end
 end

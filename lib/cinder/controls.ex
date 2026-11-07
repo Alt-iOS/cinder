@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.Controls do
   @moduledoc """
   Data preparation and render helpers for custom filter/search control layouts.
@@ -94,7 +98,7 @@ defmodule Cinder.Controls do
     filters =
       Enum.map(filterable_columns, fn column ->
         current_value = Map.get(filter_values, column.field, "")
-        key = String.to_atom(column.field)
+        key = Cinder.Filter.Helpers.declared_field_atom(column.field)
 
         {key,
          %{
@@ -273,6 +277,7 @@ defmodule Cinder.Controls do
   - `filter_mode` — display mode (true, :toggle, :toggle_open)
   - `target` — LiveComponent target
   - `theme` — theme map
+  - `has_filters` — whether to show the "Clear all" button (default true)
   """
   attr :table_id, :string, required: true
   attr :filters_label, :string, required: true
@@ -321,9 +326,13 @@ defmodule Cinder.Controls do
       <button
         :if={@has_filters}
         type="button"
+        data-cinder-clear
         phx-click="clear_all_filters"
         phx-target={@target}
-        class={[@theme.filter_clear_all_class, if(@active_filter_count == 0, do: "invisible", else: "")]}
+        class={[
+          @theme.filter_clear_all_class,
+          if(@active_filter_count == 0, do: "invisible group-data-[cinder-partial]/cinder-filters:visible", else: "")
+        ]}
         data-key="filter_clear_all_class"
       >
         {dgettext("cinder", "Clear all")}

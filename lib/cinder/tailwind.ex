@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.Tailwind do
   @moduledoc false
 
@@ -5,7 +9,7 @@ defmodule Cinder.Tailwind do
   # to keep their Tailwind configuration in sync with `priv/cinder.css` and
   # `priv/themes/*.css`.
 
-  @subdirs ~w(filter filters renderers table theme)
+  @subdirs ~w(engine filter filters next renderers table theme)
 
   @doc "Non-theme subdirs under lib/cinder/ that contain Tailwind classes."
   def subdirs, do: @subdirs

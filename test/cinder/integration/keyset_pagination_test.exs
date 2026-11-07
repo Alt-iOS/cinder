@@ -12,8 +12,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
 
   use ExUnit.Case, async: true
 
-  import Phoenix.LiveViewTest, only: [render_component: 2]
-
   alias Cinder.QueryBuilder
   alias Cinder.UrlManager
 
@@ -109,7 +107,7 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       end
     end
 
-    test "can execute offset, keyset and infinite pages without an exact count" do
+    test "can execute offset and keyset pages without an exact count" do
       base_options = [
         actor: nil,
         filters: %{},
@@ -123,7 +121,7 @@ defmodule Cinder.Integration.KeysetPaginationTest do
         before_keyset: nil
       ]
 
-      for pagination_mode <- [:offset, :keyset, :infinite] do
+      for pagination_mode <- [:offset, :keyset] do
         {:ok, page} =
           QueryBuilder.build_and_execute(
             TestItem,
@@ -161,11 +159,8 @@ defmodule Cinder.Integration.KeysetPaginationTest do
     test "parses pagination modes and count options" do
       assert Cinder.Collection.parse_pagination(:offset) == {:offset, true}
       assert Cinder.Collection.parse_pagination("keyset") == {:keyset, true}
-      assert Cinder.Collection.parse_pagination(:infinite) == {:infinite, false}
       assert Cinder.Collection.parse_pagination(count: :async) == {:offset, :async}
       assert Cinder.Collection.parse_pagination(mode: :keyset, count: false) == {:keyset, false}
-      assert Cinder.Collection.parse_pagination(mode: :infinite) == {:infinite, false}
-      assert Cinder.Collection.parse_pagination(mode: :infinite, count: true) == {:infinite, true}
 
       assert_raise ArgumentError, fn -> Cinder.Collection.parse_pagination(count: :eventually) end
       assert_raise ArgumentError, fn -> Cinder.Collection.parse_pagination(mode: :keyest) end
@@ -297,30 +292,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       names = Enum.map(page.results, & &1.name)
       assert names == ["Item 4", "Item 5", "Item 6"]
     end
-
-    test "infinite mode uses consecutive keyset batches without gaps" do
-      options = [
-        actor: nil,
-        filters: %{},
-        sort_by: [{"position", :asc}],
-        page_size: 4,
-        current_page: 1,
-        columns: [],
-        query_opts: [],
-        pagination_mode: :infinite,
-        after_keyset: nil,
-        before_keyset: nil
-      ]
-
-      {:ok, first} = QueryBuilder.build_and_execute(TestItem, options)
-      cursor = List.last(first.results).__metadata__.keyset
-
-      {:ok, second} =
-        QueryBuilder.build_and_execute(TestItem, Keyword.put(options, :after_keyset, cursor))
-
-      assert Enum.map(first.results ++ second.results, & &1.position) == Enum.to_list(1..8)
-      assert second.more?
-    end
   end
 
   # ============================================================================
@@ -385,7 +356,7 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       assert decoded.before == nil
     end
 
-    test "a keyset cursor is stored without a page number" do
+    test "prefers cursor over page number for keyset mode" do
       state = %{
         filters: %{},
         sort_by: [],
@@ -398,16 +369,9 @@ defmodule Cinder.Integration.KeysetPaginationTest do
 
       encoded = UrlManager.encode_state(state)
 
+      # Should have cursor, not page
       assert encoded[:after] == "some_cursor"
       refute Map.has_key?(encoded, :page)
-
-      decoded =
-        encoded
-        |> Map.new(fn {key, value} -> {to_string(key), value} end)
-        |> UrlManager.decode_state([])
-
-      assert decoded.after == "some_cursor"
-      assert decoded.current_page == 1
     end
 
     test "falls back to page number when no cursor present" do
@@ -500,43 +464,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
   end
 
   # ============================================================================
-  # KEYSET CURSOR EXTRACTION TESTS
-  # ============================================================================
-
-  describe "keyset cursor extraction" do
-    test "extracts keyset from result metadata" do
-      # Simulate what Ash returns
-      result = %{
-        id: "123",
-        name: "Test",
-        __metadata__: %{keyset: "encoded_cursor_value"}
-      }
-
-      keyset = get_keyset_from_result(result)
-      assert keyset == "encoded_cursor_value"
-    end
-
-    test "returns nil when no metadata" do
-      result = %{id: "123", name: "Test"}
-      assert get_keyset_from_result(result) == nil
-    end
-
-    test "returns nil for nil result" do
-      assert get_keyset_from_result(nil) == nil
-    end
-
-    # Helper to match LiveComponent's implementation
-    defp get_keyset_from_result(nil), do: nil
-
-    defp get_keyset_from_result(result) do
-      case result do
-        %{__metadata__: %{keyset: keyset}} -> keyset
-        _ -> nil
-      end
-    end
-  end
-
-  # ============================================================================
   # LIVE COMPONENT EVENT HANDLER TESTS
   # ============================================================================
 
@@ -591,24 +518,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
 
       assert socket.assigns.after_keyset == "last_cursor"
       assert socket.assigns.before_keyset == nil
-      assert socket.assigns.current_page == 2
-    end
-
-    test "changing from infinite to keyset mode reloads ordinary page data" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:loading, false)
-        |> Phoenix.Component.assign(:data, [])
-
-      {:ok, keyset_socket} = LiveComponent.update(%{pagination_mode: :keyset}, socket)
-
-      assert keyset_socket.assigns.pagination_mode == :keyset
-      assert keyset_socket.assigns.loading
     end
 
     test "preserves a disabled count mode" do
@@ -631,7 +540,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       # Simulate being on page 2 (navigated forward with after_keyset)
       socket =
         socket
-        |> Phoenix.Component.assign(:current_page, 2)
         |> Phoenix.Component.assign(:first_keyset, "page2_first_cursor")
         |> Phoenix.Component.assign(:last_keyset, "page2_last_cursor")
         |> Phoenix.Component.assign(:after_keyset, "page1_last_cursor")
@@ -641,395 +549,6 @@ defmodule Cinder.Integration.KeysetPaginationTest do
 
       assert socket.assigns.before_keyset == "page2_first_cursor"
       assert socket.assigns.after_keyset == nil
-      assert socket.assigns.current_page == 1
-    end
-
-    test "load_more advances exactly one infinite batch and ignores duplicate requests while loading" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.Component.assign(:loading, false)
-        |> Phoenix.Component.assign(:error, false)
-        |> Phoenix.Component.assign(:infinite_has_next, true)
-        |> Phoenix.Component.assign(:infinite_pages, [
-          %{
-            page: 1,
-            first_keyset: "first_cursor",
-            last_keyset: "last_cursor",
-            ids: ["1"],
-            selectable_ids: ["1"]
-          }
-        ])
-
-      {:noreply, loading_socket} = LiveComponent.handle_event("load_more", %{}, socket)
-
-      assert loading_socket.assigns.after_keyset == "last_cursor"
-      assert loading_socket.assigns.current_page == 2
-      assert loading_socket.assigns.infinite_append?
-      assert loading_socket.assigns.loading
-
-      {:noreply, unchanged_socket} =
-        LiveComponent.handle_event("load_more", %{}, loading_socket)
-
-      assert unchanged_socket.assigns.current_page == 2
-    end
-
-    test "infinite mode restores a keyset cursor from URL state" do
-      assigns =
-        build_keyset_test_assigns()
-        |> Map.merge(%{
-          pagination_mode: :infinite,
-          url_raw_params: %{"after" => "resume-cursor"}
-        })
-
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      assert socket.assigns.after_keyset == "resume-cursor"
-      assert socket.assigns.before_keyset == nil
-    end
-
-    test "every infinite load publishes its resume cursor when it starts" do
-      assigns =
-        build_keyset_test_assigns()
-        |> Map.merge(%{pagination_mode: :infinite, on_state_change: :table_changed})
-
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:loading, false)
-        |> Phoenix.Component.assign(:error, false)
-        |> Phoenix.Component.assign(:infinite_has_next, true)
-        |> Phoenix.Component.assign(:infinite_pages, [
-          %{
-            page: 1,
-            first_keyset: "first_cursor",
-            last_keyset: "resume_cursor",
-            ids: ["1"],
-            selectable_ids: ["1"],
-            items: [
-              %{id: "1", keyset: "resume_cursor", number: 1, selectable?: true}
-            ]
-          }
-        ])
-
-      {:noreply, loading_socket} = LiveComponent.handle_event("load_more", %{}, socket)
-      assert_receive {:table_changed, "keyset-test-table", %{after: "resume_cursor"}}
-      assert loading_socket.assigns.loading
-    end
-
-    test "manual infinite pagination renders a working button without the viewport hook" do
-      page = %Ash.Page.Keyset{
-        results: [],
-        count: nil,
-        limit: 25,
-        more?: true,
-        after: nil,
-        before: nil,
-        rerun: nil
-      }
-
-      html =
-        render_component(&Cinder.Renderers.Pagination.render/1, %{
-          id: "manual-infinite",
-          page: page,
-          page_size_config: Cinder.PageSize.parse(25),
-          theme: Cinder.Theme.default(),
-          myself: %Phoenix.LiveComponent.CID{cid: 1},
-          show_pagination: true,
-          pagination_mode: :infinite,
-          infinite_load: :manual,
-          load_more_label: "Fetch another batch",
-          has_next: true,
-          loading: false,
-          error: false
-        })
-
-      assert html =~ ~s(phx-click="load_more")
-      assert html =~ "Fetch another batch"
-      refute html =~ ~s(phx-hook="CinderInfiniteSentinel")
-    end
-
-    test "automatic infinite pagination attaches the viewport hook" do
-      page = %Ash.Page.Keyset{
-        results: [],
-        count: nil,
-        limit: 25,
-        more?: true,
-        after: nil,
-        before: nil,
-        rerun: nil
-      }
-
-      html =
-        render_component(&Cinder.Renderers.Pagination.render/1, %{
-          id: "automatic-infinite",
-          page: page,
-          page_size_config: Cinder.PageSize.parse(25),
-          theme: Cinder.Theme.default(),
-          myself: %Phoenix.LiveComponent.CID{cid: 1},
-          show_pagination: true,
-          pagination_mode: :infinite,
-          infinite_load: :automatic,
-          load_more_label: "Load more",
-          has_next: true,
-          loading: false,
-          error: false
-        })
-
-      assert html =~ ~s(phx-click="load_more")
-      assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
-    end
-
-    test "load_more is ignored at the end of infinite results" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.Component.assign(:loading, false)
-        |> Phoenix.Component.assign(:error, false)
-        |> Phoenix.Component.assign(:last_keyset, "last_cursor")
-        |> Phoenix.Component.assign(:page, %{more?: false})
-
-      {:noreply, unchanged_socket} = LiveComponent.handle_event("load_more", %{}, socket)
-
-      assert unchanged_socket.assigns.current_page == 1
-      refute unchanged_socket.assigns.infinite_append?
-    end
-
-    test "programmatic refresh resets and requeries the bounded infinite window" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:current_page, 4)
-        |> Phoenix.Component.assign(:after_keyset, "last_cursor")
-        |> Phoenix.Component.assign(:first_keyset, "first_cursor")
-        |> Phoenix.Component.assign(:last_keyset, "last_cursor")
-        |> Phoenix.Component.assign(:infinite_append?, true)
-        |> Phoenix.Component.assign(:infinite_direction, :append)
-        |> Phoenix.Component.assign(:infinite_item_ids, MapSet.new(["1", "2"]))
-        |> Phoenix.Component.assign(:infinite_selectable_ids, MapSet.new(["1", "2"]))
-        |> Phoenix.Component.assign(:infinite_loaded_count, 2)
-        |> Phoenix.Component.assign(:infinite_range_start, 7)
-        |> Phoenix.Component.assign(:infinite_range_end, 8)
-        |> Phoenix.Component.assign(:infinite_pages, [
-          %{
-            page: 4,
-            first_keyset: "first_cursor",
-            last_keyset: "last_cursor",
-            ids: ["1", "2"],
-            selectable_ids: ["1", "2"],
-            items: []
-          }
-        ])
-
-      {:ok, refreshed_socket} = LiveComponent.update(%{refresh: true}, socket)
-
-      assert refreshed_socket.assigns.current_page == 1
-      assert refreshed_socket.assigns.after_keyset == nil
-      assert refreshed_socket.assigns.before_keyset == nil
-      assert refreshed_socket.assigns.first_keyset == nil
-      assert refreshed_socket.assigns.last_keyset == nil
-      assert refreshed_socket.assigns.infinite_pages == []
-      assert refreshed_socket.assigns.infinite_item_ids == MapSet.new()
-      assert refreshed_socket.assigns.infinite_selectable_ids == MapSet.new()
-      assert refreshed_socket.assigns.infinite_loaded_count == 0
-      assert refreshed_socket.assigns.infinite_range_start == 0
-      assert refreshed_socket.assigns.infinite_range_end == 0
-      assert refreshed_socket.assigns.loading
-      refute refreshed_socket.assigns.infinite_append?
-      assert refreshed_socket.assigns.infinite_direction == :reset
-    end
-
-    test "silent refresh preserves the bounded infinite window until replacement" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      pages = [
-        %{
-          page: 4,
-          first_keyset: "first_cursor",
-          last_keyset: "last_cursor",
-          ids: ["1", "2"],
-          selectable_ids: ["1", "2"],
-          items: []
-        }
-      ]
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:current_page, 4)
-        |> Phoenix.Component.assign(:after_keyset, "last_cursor")
-        |> Phoenix.Component.assign(:first_keyset, "first_cursor")
-        |> Phoenix.Component.assign(:last_keyset, "last_cursor")
-        |> Phoenix.Component.assign(:infinite_direction, :append)
-        |> Phoenix.Component.assign(:infinite_item_ids, MapSet.new(["1", "2"]))
-        |> Phoenix.Component.assign(:infinite_selectable_ids, MapSet.new(["1", "2"]))
-        |> Phoenix.Component.assign(:infinite_loaded_count, 2)
-        |> Phoenix.Component.assign(:infinite_range_start, 7)
-        |> Phoenix.Component.assign(:infinite_range_end, 8)
-        |> Phoenix.Component.assign(:infinite_pages, pages)
-
-      {:ok, refreshed_socket} =
-        LiveComponent.update(%{refresh: true, silent: true}, socket)
-
-      assert refreshed_socket.assigns.loading
-      assert refreshed_socket.assigns.silent
-      assert refreshed_socket.assigns.current_page == 1
-      assert refreshed_socket.assigns.after_keyset == nil
-      assert refreshed_socket.assigns.infinite_direction == :reset
-      assert refreshed_socket.assigns.infinite_pages == pages
-      assert refreshed_socket.assigns.infinite_item_ids == MapSet.new(["1", "2"])
-      assert refreshed_socket.assigns.infinite_loaded_count == 2
-      assert refreshed_socket.assigns.infinite_range_start == 7
-      assert refreshed_socket.assigns.infinite_range_end == 8
-
-      refreshed_socket = Phoenix.LiveView.cancel_async(refreshed_socket, :load_data)
-
-      {:noreply, failed_socket} =
-        LiveComponent.handle_async(
-          :load_data,
-          {:ok, {{:error, :timeout}, nil}},
-          refreshed_socket
-        )
-
-      refute failed_socket.assigns.loading
-      refute failed_socket.assigns.silent
-      refute failed_socket.assigns.error
-      assert failed_socket.assigns.current_page == 4
-      assert failed_socket.assigns.after_keyset == "last_cursor"
-      assert failed_socket.assigns.infinite_direction == :append
-      assert failed_socket.assigns.infinite_pages == pages
-      assert failed_socket.assigns.infinite_item_ids == MapSet.new(["1", "2"])
-      assert failed_socket.assigns.infinite_loaded_count == 2
-    end
-
-    test "an asynchronous infinite result retains only IDs and discards duplicate records" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:current_page, 2)
-        |> Phoenix.Component.assign(:infinite_direction, :append)
-        |> Phoenix.Component.assign(:infinite_append?, true)
-        |> Phoenix.Component.assign(:infinite_item_ids, MapSet.new(["1", "2"]))
-        |> Phoenix.Component.assign(:infinite_loaded_count, 2)
-        |> Phoenix.Component.assign(:infinite_pages, [
-          %{
-            page: 1,
-            first_keyset: "first_cursor",
-            last_keyset: "last_cursor",
-            ids: ["1", "2"],
-            selectable_ids: ["1", "2"],
-            items: [
-              %{id: "1", keyset: "first_cursor", number: 1, selectable?: true},
-              %{id: "2", keyset: "last_cursor", number: 2, selectable?: true}
-            ]
-          }
-        ])
-
-      page = %Ash.Page.Offset{
-        results: [%{id: "2"}, %{id: "3"}],
-        count: 3,
-        offset: 0,
-        limit: 2,
-        more?: false
-      }
-
-      {:noreply, socket} =
-        LiveComponent.handle_async(:load_data, {:ok, {{:ok, page}, nil}}, socket)
-
-      assert socket.assigns.data == []
-      assert socket.assigns.infinite_item_ids == MapSet.new(["1", "2", "3"])
-      assert socket.assigns.infinite_loaded_count == 3
-      assert socket.assigns.page.results == []
-      refute socket.assigns.infinite_append?
-      refute socket.assigns.loading
-    end
-
-    test "an asynchronous append error preserves loaded records for retry" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :infinite)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:infinite_item_ids, MapSet.new(["1"]))
-        |> Phoenix.Component.assign(:infinite_loaded_count, 1)
-        |> Phoenix.Component.assign(:infinite_append?, true)
-
-      {:noreply, socket} =
-        LiveComponent.handle_async(:load_data, {:ok, {{:error, :timeout}, nil}}, socket)
-
-      assert socket.assigns.data == []
-      assert socket.assigns.infinite_item_ids == MapSet.new(["1"])
-      assert socket.assigns.infinite_loaded_count == 1
-      assert socket.assigns.error
-      assert socket.assigns.infinite_append?
-    end
-
-    test "keyset navigation preserves query-wide deselection exceptions" do
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(build_keyset_test_assigns(), socket)
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:selection_mode, :all_matching)
-        |> Phoenix.Component.assign(:selected_ids, MapSet.new(["excluded-id"]))
-        |> Phoenix.Component.assign(:first_keyset, "first_cursor")
-        |> Phoenix.Component.assign(:last_keyset, "last_cursor")
-
-      {:noreply, socket} = LiveComponent.handle_event("next_page", %{}, socket)
-
-      assert socket.assigns.selection_mode == :all_matching
-      assert socket.assigns.selected_ids == MapSet.new(["excluded-id"])
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:first_keyset, "page2_first_cursor")
-
-      {:noreply, socket} = LiveComponent.handle_event("prev_page", %{}, socket)
-
-      assert socket.assigns.selection_mode == :all_matching
-      assert socket.assigns.selected_ids == MapSet.new(["excluded-id"])
-    end
-
-    test "offset navigation preserves query-wide deselection exceptions" do
-      assigns = build_keyset_test_assigns() |> Map.put(:pagination_mode, :offset)
-      {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
-      {:ok, socket} = LiveComponent.update(assigns, socket)
-
-      socket =
-        socket
-        |> Phoenix.LiveView.cancel_async(:load_data)
-        |> Phoenix.Component.assign(:selection_mode, :all_matching)
-        |> Phoenix.Component.assign(:selected_ids, MapSet.new(["excluded-id"]))
-
-      {:noreply, socket} = LiveComponent.handle_event("goto_page", %{"page" => "2"}, socket)
-
-      assert socket.assigns.current_page == 2
-      assert socket.assigns.selection_mode == :all_matching
-      assert socket.assigns.selected_ids == MapSet.new(["excluded-id"])
     end
 
     test "change_page_size event clears keyset cursors" do
@@ -1146,12 +665,14 @@ defmodule Cinder.Integration.KeysetPaginationTest do
       {:ok, socket} = LiveComponent.mount(%Phoenix.LiveView.Socket{})
       {:ok, socket} = LiveComponent.update(build_keyset_test_assigns(), socket)
 
-      # Simulate having navigated to page 2
+      # Simulate having navigated to page 2. The key must be a declared sortable
+      # column or the event is ignored.
       socket =
         socket
         |> Phoenix.Component.assign(:after_keyset, "page1_last_cursor")
         |> Phoenix.Component.assign(:before_keyset, nil)
         |> Phoenix.Component.assign(:sort_by, [])
+        |> Phoenix.Component.assign(:columns, [%{field: "name", sortable: true, sort_cycle: nil}])
 
       {:noreply, socket} =
         LiveComponent.handle_event("toggle_sort", %{"key" => "name"}, socket)
