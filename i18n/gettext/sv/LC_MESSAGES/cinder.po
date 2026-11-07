@@ -203,3 +203,8 @@ msgstr "Ett fel uppstod vid laddning av data"
 #, elixir-autogen, elixir-format
 msgid "Page %{current}"
 msgstr "Sida %{current}"
+
+#: lib/cinder/renderers/select_all.ex
+#, elixir-autogen, elixir-format
+msgid "Select all visible items"
+msgstr ""

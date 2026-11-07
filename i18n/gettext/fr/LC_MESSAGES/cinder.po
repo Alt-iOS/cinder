@@ -200,3 +200,8 @@ msgstr "Une erreur s'est produite lors du chargement des données"
 #, elixir-autogen, elixir-format
 msgid "Page %{current}"
 msgstr "Page %{current}"
+
+#: lib/cinder/renderers/select_all.ex
+#, elixir-autogen, elixir-format
+msgid "Select all visible items"
+msgstr ""

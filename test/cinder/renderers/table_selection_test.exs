@@ -130,7 +130,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*checked[^>]*phx-click="toggle_select_all_page"/
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
 
     test "row checkbox reflects selection state" do
@@ -199,7 +199,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      assert html =~ ~r/<input[^>]*checked[^>]*phx-click="toggle_select_all_page"/
+      assert html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
 
     test "header checkbox is unchecked when there are no selectable rows" do
@@ -214,7 +214,7 @@ defmodule Cinder.Renderers.TableSelectionTest do
 
       html = render_component(&TableRenderer.render/1, assigns)
 
-      refute html =~ ~r/<input[^>]*checked[^>]*phx-click="toggle_select_all_page"/
+      refute html =~ ~r/<input[^>]*\schecked(?:\s|>)[^>]*phx-click="toggle_select_all_page"/
     end
   end
 end

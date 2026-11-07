@@ -438,7 +438,11 @@ defmodule Cinder.LiveComponent do
   @impl true
   def handle_event("toggle_select_all_page", _params, socket) do
     id_field = socket.assigns[:id_field] || :id
-    selectable = socket.assigns[:selectable] || false
+
+    selectable =
+      if socket.assigns[:select_all] == false,
+        do: false,
+        else: socket.assigns[:selectable] || false
 
     page_ids =
       socket.assigns.data

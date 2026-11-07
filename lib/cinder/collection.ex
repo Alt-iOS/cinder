@@ -233,6 +233,9 @@ defmodule Cinder.Collection do
     doc: "The field identifying each record, for selection and the `Cinder.Update` functions"
   )
 
+  attr(:select_all, :any, default: :page, values: [:page, false])
+  attr(:select_all_label, :string, default: nil)
+
   attr(:selectable, :any,
     default: false,
     doc:
@@ -385,6 +388,8 @@ defmodule Cinder.Collection do
       |> assign_new(:search, fn -> nil end)
       |> assign_new(:grid_columns, fn -> nil end)
       |> assign_new(:pagination, fn -> :offset end)
+      |> assign_new(:select_all, fn -> :page end)
+      |> assign_new(:select_all_label, fn -> nil end)
       |> assign_new(:selectable, fn -> false end)
       |> assign_new(:on_selection_change, fn -> nil end)
       |> assign(:sort_mode, normalize_sort_mode(assigns[:sort_mode]))
@@ -516,6 +521,8 @@ defmodule Cinder.Collection do
         pagination_mode={@pagination_mode}
         count_mode={@count_mode}
         id_field={@id_field}
+        select_all={@select_all}
+        select_all_label={@select_all_label}
         selectable={@selectable}
         on_selection_change={@on_selection_change}
         on_query_change={@on_query_change}

@@ -203,3 +203,8 @@ msgstr "Er is een fout opgetreden bij het laden van gegevens"
 #, elixir-autogen, elixir-format
 msgid "Page %{current}"
 msgstr "Pagina %{current}"
+
+#: lib/cinder/renderers/select_all.ex
+#, elixir-autogen, elixir-format
+msgid "Select all visible items"
+msgstr ""

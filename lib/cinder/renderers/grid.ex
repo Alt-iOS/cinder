@@ -77,6 +77,7 @@ defmodule Cinder.Renderers.Grid do
         />
       </div>
 
+    <Cinder.Renderers.SelectAll.render :if={Selection.enabled?(@selectable) and Map.get(assigns, :select_all, :page) == :page} data={@data} id_field={@id_field} loading={@show_loading_state} label={Map.get(assigns, :select_all_label)} myself={@myself} selectable={@selectable} selected_ids={@selected_ids} theme={@theme} />
       <!-- Bulk Actions -->
       <BulkActions.render
         selectable={@selectable}

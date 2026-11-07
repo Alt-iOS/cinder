@@ -60,14 +60,7 @@ defmodule Cinder.Renderers.Table do
           <thead class={@theme.thead_class} data-key="thead_class">
             <tr class={@theme.header_row_class} data-key="header_row_class">
               <th :if={Selection.enabled?(@selectable)} class={[@theme.th_class, "w-10"]} data-key="th_class">
-                <input
-                  type="checkbox"
-                  checked={all_page_selected?(@selected_ids, @data, @id_field, @selectable)}
-                  phx-click="toggle_select_all_page"
-                  phx-target={@myself}
-                  class={@theme.selection_checkbox_class}
-                  data-key="selection_checkbox_class"
-                />
+    <Cinder.Renderers.SelectAll.render :if={Map.get(assigns, :select_all, :page) == :page} show_label={false} data={@data} id_field={@id_field} loading={@show_loading_state} label={Map.get(assigns, :select_all_label)} myself={@myself} selectable={@selectable} selected_ids={@selected_ids} theme={@theme} />
               </th>
               <th :for={column <- @columns} class={[@theme.th_class, column.class]} data-key="th_class">
                 <div :if={column.sortable}
@@ -172,17 +165,6 @@ defmodule Cinder.Renderers.Table do
   # ============================================================================
   # HELPER FUNCTIONS
   # ============================================================================
-
-  defp all_page_selected?(selected_ids, data, id_field, selectable) when is_list(data) do
-    selectable_items = Enum.filter(data, &Selection.item_selectable?(selectable, &1))
-
-    selectable_items != [] and
-      Enum.all?(selectable_items, fn item ->
-        Selection.item_selected?(selected_ids, item, id_field)
-      end)
-  end
-
-  defp all_page_selected?(_selected_ids, _data, _id_field, _selectable), do: false
 
   defp column_count(columns, selectable) do
     base_count = length(columns)

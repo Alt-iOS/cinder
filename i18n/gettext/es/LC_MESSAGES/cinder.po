@@ -203,3 +203,8 @@ msgstr "Ocurrió un error al cargar los datos"
 #, elixir-autogen, elixir-format
 msgid "Page %{current}"
 msgstr "Página %{current}"
+
+#: lib/cinder/renderers/select_all.ex
+#, elixir-autogen, elixir-format
+msgid "Select all visible items"
+msgstr "Seleccionar todos los elementos visibles"
