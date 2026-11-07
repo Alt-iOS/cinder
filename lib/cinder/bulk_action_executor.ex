@@ -1,46 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.BulkActionExecutor do
-  @moduledoc """
-  Executes bulk actions on selected records.
-
-  This module is used internally by `Cinder.LiveComponent` to execute bulk actions
-  defined in `bulk_action` slots. It handles both Ash action atoms and function
-  captures.
-
-  ## Atom Actions
-
-  When given an atom, introspects the resource to determine if it's an update or
-  destroy action, then calls `Ash.bulk_update/4` or `Ash.bulk_destroy/4`:
-
-      BulkActionExecutor.execute(:archive,
-        resource: MyApp.User,
-        ids: ["1", "2"],
-        actor: current_user
-      )
-
-  ## Function Actions
-
-  When given a function, calls it with `(query, opts)` matching the signature of
-  Ash code interface functions. The query is pre-filtered to the selected IDs:
-
-      BulkActionExecutor.execute(&MyApp.Users.archive/2,
-        resource: MyApp.User,
-        ids: ["1", "2"],
-        actor: current_user
-      )
-
-  ## Options Handling
-
-  - **Atom actions**: `action_opts` are merged directly into Ash options
-  - **Function actions**: `action_opts` are wrapped in `bulk_options: [...]` for
-    code interface compatibility
-  """
+  @moduledoc false
+  # Executes bulk actions on selected records.
+  #
+  # This module is used internally by `Cinder.LiveComponent` to execute bulk actions
+  # defined in `bulk_action` slots. It handles both Ash action atoms and function
+  # captures.
+  #
+  # ## Atom Actions
+  #
+  # When given an atom, introspects the resource to determine if it's an update or
+  # destroy action, then calls `Ash.bulk_update/4` or `Ash.bulk_destroy/4`:
+  #
+  #     BulkActionExecutor.execute(:archive,
+  #       resource: MyApp.User,
+  #       ids: ["1", "2"],
+  #       actor: current_user
+  #     )
+  #
+  # ## Function Actions
+  #
+  # When given a function, calls it with `(query, opts)` matching the signature of
+  # Ash code interface functions. The query is pre-filtered to the selected IDs:
+  #
+  #     BulkActionExecutor.execute(&MyApp.Users.archive/2,
+  #       resource: MyApp.User,
+  #       ids: ["1", "2"],
+  #       actor: current_user
+  #     )
+  #
+  # ## Options Handling
+  #
+  # - **Atom actions**: `action_opts` are merged directly into Ash options
+  # - **Function actions**: `action_opts` are wrapped in `bulk_options: [...]` for
+  #   code interface compatibility
 
   @type action :: atom() | (Ash.Query.t(), keyword() -> any())
   @type opts :: [
-          resource: Ash.Resource.t(),
+          resource: Ash.Resource.t() | Ash.Query.t(),
           ids: [String.t()],
-          query: Ash.Query.t(),
-          exclude_ids: [String.t()],
           id_field: atom(),
           actor: any(),
           tenant: any(),
@@ -53,7 +54,8 @@ defmodule Cinder.BulkActionExecutor do
 
   ## Options
 
-  - `:resource` - The Ash resource (required)
+  - `:resource` - The Ash resource, or a base `Ash.Query` whose filters, tenant and read
+    action bound which records the action can touch (required)
   - `:ids` - List of record IDs to act on (required)
   - `:id_field` - The field to filter on (default: `:id`)
   - `:actor` - Actor for authorization
@@ -86,55 +88,48 @@ defmodule Cinder.BulkActionExecutor do
       # Destroy action
       execute(:destroy, resource: MyApp.User, ids: ["1", "2"])
   """
-  @spec execute(action(), opts()) :: {:ok, any()} | {:error, any()}
+  @spec execute(action(), opts()) ::
+          {:ok, any()} | {:error, any()} | {:partial_success, Ash.BulkResult.t()}
   def execute(action, opts) do
     resource = Keyword.fetch!(opts, :resource)
-    ids = Keyword.get(opts, :ids)
+    ids = Keyword.fetch!(opts, :ids)
     id_field = Keyword.get(opts, :id_field, :id)
     action_opts = Keyword.get(opts, :action_opts, [])
 
-    query =
-      case Keyword.get(opts, :query) do
-        %Ash.Query{} = query -> exclude_ids(query, Keyword.get(opts, :exclude_ids, []), id_field)
-        nil when is_list(ids) -> build_query(resource, ids, id_field)
-        nil -> raise ArgumentError, "expected either :ids or :query"
-      end
-
+    query = build_query(resource, ids, id_field)
     base_opts = build_auth_opts(opts)
 
     run_action(action, query, base_opts, action_opts)
   end
 
   @doc """
-  Builds an Ash.Query filtered to the given IDs.
+  Builds an Ash.Query filtered to the given IDs, from a resource or a base query
+  (whose own filters are kept, so the IDs can't reach records outside it).
   """
-  @spec build_query(Ash.Resource.t(), [String.t()], atom()) :: Ash.Query.t()
-  def build_query(resource, ids, id_field \\ :id) do
+  @spec build_query(Ash.Resource.t() | Ash.Query.t(), [String.t()], atom()) :: Ash.Query.t()
+  def build_query(resource_or_query, ids, id_field \\ :id) do
     filter = %{id_field => [in: ids]}
 
-    resource
+    resource_or_query
     |> Ash.Query.new()
     |> Ash.Query.filter_input(filter)
-  end
-
-  @doc false
-  def exclude_ids(query, [], _id_field), do: query
-
-  def exclude_ids(%Ash.Query{} = query, ids, id_field) do
-    Ash.Query.filter_input(query, %{not: %{id_field => [in: ids]}})
   end
 
   @doc """
   Normalizes a bulk action result to `{:ok, result}` or `{:error, reason}`.
   """
-  @spec normalize_result(any()) :: {:ok, any()} | {:error, any()}
+  @spec normalize_result(any()) ::
+          {:ok, any()} | {:error, any()} | {:partial_success, Ash.BulkResult.t()}
   def normalize_result(result) do
     case result do
       {:ok, _} = success -> success
       {:error, _} = error -> error
       :ok -> {:ok, :ok}
       %Ash.BulkResult{status: :success} = bulk -> {:ok, bulk}
-      %Ash.BulkResult{errors: errors} when errors != [] -> {:error, errors}
+      %Ash.BulkResult{status: :error, errors: errors} -> {:error, errors}
+      # Ash skipped the records that failed and committed the rest; like Ash's own
+      # bang functions, Cinder treats that as a failure
+      %Ash.BulkResult{status: :partial_success} = bulk -> {:partial_success, bulk}
       other -> {:ok, other}
     end
   end
@@ -161,7 +156,9 @@ defmodule Cinder.BulkActionExecutor do
 
   # Atom actions: merge action_opts directly (for Ash.bulk_update/bulk_destroy)
   defp run_action(action, query, base_opts, action_opts) when is_atom(action) do
-    opts = Keyword.merge(base_opts, action_opts)
+    # Ash only returns a bulk action's errors when asked, and a partial success would
+    # otherwise arrive with none; `action_opts` can turn it off (it can be expensive)
+    opts = base_opts |> Keyword.put(:return_errors?, true) |> Keyword.merge(action_opts)
     resource = query.resource
 
     result =

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.LiveComponent do
   @moduledoc """
   Shared LiveComponent for all Cinder data layouts (Table, List, etc.).
@@ -15,7 +19,6 @@ defmodule Cinder.LiveComponent do
 
   use Phoenix.LiveComponent
   require Logger
-
   use Cinder.Messages
 
   @impl true
@@ -31,23 +34,18 @@ defmodule Cinder.LiveComponent do
 
   def update(%{refresh: true} = assigns, socket) do
     # Force refresh of data
-    silent? = Map.get(assigns, :silent, false) == true and refreshable_data_present?(socket)
+    silent? =
+      Map.get(assigns, :silent, false) == true and
+        socket.assigns[:data] not in [nil, []]
 
     socket =
       socket
       |> assign(Map.drop(assigns, [:refresh, :silent]))
       |> assign_defaults()
-      |> assign(:silent, silent?)
-      |> prepare_refresh()
-      |> ensure_infinite_stream()
       |> assign_column_definitions()
       |> load_data(silent?)
 
     {:ok, socket}
-  end
-
-  def update(%{__infinite_prefetch__: true}, socket) do
-    {:ok, maybe_start_infinite_prefetch(socket)}
   end
 
   def update(%{__update_item__: {id, update_fn}}, socket) do
@@ -76,48 +74,23 @@ defmodule Cinder.LiveComponent do
   def update(%{__remove_items__: ids}, socket) when is_list(ids) do
     id_field = socket.assigns[:id_field] || :id
     id_set = MapSet.new(ids, &to_string/1)
+    data = socket.assigns.data || []
 
-    {socket, emptied?} =
-      if infinite_mode?(socket) do
-        removed = MapSet.size(MapSet.intersection(socket.assigns.infinite_item_ids, id_set))
+    updated_data =
+      Enum.reject(data, fn item ->
+        MapSet.member?(id_set, to_string(Map.get(item, id_field)))
+      end)
 
-        {socket
-         |> remove_infinite_items(id_set)
-         |> drop_removed_from_count(removed), false}
-      else
-        data = socket.assigns.data || []
-
-        updated_data =
-          Enum.reject(data, fn item ->
-            MapSet.member?(id_set, to_string(Map.get(item, id_field)))
-          end)
-
-        removed = length(data) - length(updated_data)
-
-        {socket
-         |> assign(:data, updated_data)
-         |> assign(:page, drop_removed_from_page(socket.assigns[:page], updated_data, removed))
-         |> drop_removed_from_count(removed), updated_data == [] and data != []}
-      end
-
+    removed = length(data) - length(updated_data)
     selected_ids = socket.assigns[:selected_ids] || MapSet.new()
-
-    updated_selected_ids =
-      case socket.assigns[:selection_mode] do
-        :all_matching -> MapSet.union(selected_ids, id_set)
-        _ -> MapSet.difference(selected_ids, id_set)
-      end
-
-    updated_selection_scope_ids =
-      case socket.assigns[:selection_scope_ids] do
-        %MapSet{} = scope_ids -> MapSet.difference(scope_ids, id_set)
-        scope_ids -> scope_ids
-      end
+    updated_selected_ids = MapSet.difference(selected_ids, id_set)
 
     socket =
       socket
+      |> assign(:data, updated_data)
       |> assign(:selected_ids, updated_selected_ids)
-      |> assign(:selection_scope_ids, updated_selection_scope_ids)
+      |> assign(:page, drop_removed_from_page(socket.assigns[:page], updated_data, removed))
+      |> update(:total_count, &(&1 && max(&1 - removed, 0)))
 
     socket =
       if MapSet.equal?(selected_ids, updated_selected_ids) do
@@ -126,7 +99,12 @@ defmodule Cinder.LiveComponent do
         notify_selection_change(socket, :remove)
       end
 
-    socket = if emptied?, do: reload_emptied_page(socket), else: socket
+    socket =
+      if updated_data == [] and data != [] do
+        reload_emptied_page(socket)
+      else
+        socket
+      end
 
     {:ok, socket}
   end
@@ -166,37 +144,55 @@ defmodule Cinder.LiveComponent do
 
   def update(assigns, socket) do
     prev_state = data_state(socket.assigns)
-    prev_selection_scope = selection_scope_state(socket.assigns)
 
     socket =
       socket
       |> assign(assigns)
       |> assign_defaults()
-      |> ensure_infinite_stream()
       |> assign_column_definitions()
       |> decode_url_state(assigns)
-      |> maybe_invalidate_selection_scope(prev_selection_scope)
       |> load_data_if_needed(prev_state)
+      |> clear_stale_selection(prev_state)
 
     {:ok, socket}
   end
 
-  defp do_update_item_if_visible(socket, id, raw_item, update_fn, id_field) do
-    if infinite_mode?(socket) do
-      do_update_infinite_item_if_visible(socket, id, raw_item, update_fn, id_field)
+  @scope_keys [:query, :actor_id, :tenant_id, :scope_id]
+
+  # A new base query, actor, tenant or scope means a different set of records, so a
+  # selection made in the old one is cleared: otherwise it would count records the
+  # bulk actions can no longer reach. The user's own filters, sort and page are left
+  # alone, since a selection is meant to survive those.
+  #
+  # Turning selection off clears it too: otherwise the rows still show as
+  # selected, and the old selection comes back if it's turned on again.
+  defp clear_stale_selection(socket, prev_state) do
+    scope_changed? =
+      Map.take(data_state(socket.assigns), @scope_keys) != Map.take(prev_state, @scope_keys)
+
+    clear? = scope_changed? or not Cinder.Selection.enabled?(socket.assigns[:selectable])
+
+    if clear? and MapSet.size(socket.assigns[:selected_ids] || MapSet.new()) > 0 do
+      socket
+      |> assign(:selected_ids, MapSet.new())
+      |> notify_selection_change(:clear)
     else
-      data = socket.assigns.data || []
+      socket
+    end
+  end
 
-      case Enum.find(data, &(Map.get(&1, id_field) == id)) do
-        nil ->
-          {:ok, socket}
+  defp do_update_item_if_visible(socket, id, raw_item, update_fn, id_field) do
+    data = socket.assigns.data || []
 
-        old_item ->
-          input = raw_item || old_item
-          updated = update_fn.(input)
-          updated_data = Enum.map(data, &if(Map.get(&1, id_field) == id, do: updated, else: &1))
-          {:ok, assign(socket, :data, updated_data)}
-      end
+    case Enum.find(data, &(Map.get(&1, id_field) == id)) do
+      nil ->
+        {:ok, socket}
+
+      old_item ->
+        input = raw_item || old_item
+        updated = update_fn.(input)
+        updated_data = Enum.map(data, &if(Map.get(&1, id_field) == id, do: updated, else: &1))
+        {:ok, assign(socket, :data, updated_data)}
     end
   end
 
@@ -206,220 +202,24 @@ defmodule Cinder.LiveComponent do
   end
 
   defp do_update_items_if_visible(socket, items_by_id, ids, update_fn, id_field) do
-    if infinite_mode?(socket) do
-      do_update_infinite_items_if_visible(socket, items_by_id, ids, update_fn, id_field)
-    else
-      data = socket.assigns.data || []
-      id_set = MapSet.new(ids)
-      visible_ids = data |> Enum.map(&Map.get(&1, id_field)) |> MapSet.new()
-      ids_to_update = MapSet.intersection(id_set, visible_ids)
+    data = socket.assigns.data || []
+    id_set = MapSet.new(ids)
+    visible_ids = data |> Enum.map(&Map.get(&1, id_field)) |> MapSet.new()
+    ids_to_update = MapSet.intersection(id_set, visible_ids)
 
-      if MapSet.size(ids_to_update) == 0 do
-        {:ok, socket}
-      else
-        input_items = get_input_items(data, items_by_id, ids_to_update, id_field)
-        updated_by_id = update_fn.(input_items) |> to_map_by_id(id_field)
-
-        updated_data =
-          Enum.map(data, fn item ->
-            id = Map.get(item, id_field)
-            Map.get(updated_by_id, id, item)
-          end)
-
-        {:ok, assign(socket, :data, updated_data)}
-      end
-    end
-  end
-
-  # Infinite collections intentionally retain only IDs, cursors, numbering and
-  # selection metadata on the server. A full incoming record is therefore
-  # required for a targeted update; ID-only updates remain a safe no-op.
-  defp do_update_infinite_item_if_visible(socket, id, %{} = raw_item, update_fn, id_field) do
-    normalized_id = to_string(id)
-
-    if MapSet.member?(socket.assigns.infinite_item_ids, normalized_id) do
-      updated = update_fn.(raw_item)
-      {:ok, update_infinite_entries(socket, %{normalized_id => updated}, id_field)}
-    else
-      {:ok, socket}
-    end
-  end
-
-  defp do_update_infinite_item_if_visible(socket, _id, nil, _update_fn, _id_field),
-    do: {:ok, socket}
-
-  defp do_update_infinite_items_if_visible(socket, items_by_id, _ids, update_fn, id_field)
-       when is_map(items_by_id) do
-    raw_by_id = Map.new(items_by_id, fn {id, item} -> {to_string(id), item} end)
-
-    visible_items =
-      socket.assigns.infinite_pages
-      |> Enum.flat_map(& &1.items)
-      |> Enum.filter(&Map.has_key?(raw_by_id, &1.id))
-      |> Enum.map(&Map.fetch!(raw_by_id, &1.id))
-
-    if visible_items == [] do
+    if MapSet.size(ids_to_update) == 0 do
       {:ok, socket}
     else
-      updated_by_id =
-        visible_items
-        |> update_fn.()
-        |> to_map_by_normalized_id(id_field)
+      input_items = get_input_items(data, items_by_id, ids_to_update, id_field)
+      updated_by_id = update_fn.(input_items) |> to_map_by_id(id_field)
 
-      {:ok, update_infinite_entries(socket, updated_by_id, id_field)}
-    end
-  end
+      updated_data =
+        Enum.map(data, fn item ->
+          id = Map.get(item, id_field)
+          Map.get(updated_by_id, id, item)
+        end)
 
-  defp do_update_infinite_items_if_visible(socket, nil, _ids, _update_fn, _id_field),
-    do: {:ok, socket}
-
-  defp update_infinite_entries(socket, updated_by_id, id_field) do
-    selectable = socket.assigns.selectable
-
-    {pages, entries} =
-      Enum.map_reduce(socket.assigns.infinite_pages, [], fn page, entries ->
-        {items, entries} =
-          Enum.map_reduce(page.items, entries, fn item_meta, entries ->
-            case Map.fetch(updated_by_id, item_meta.id) do
-              {:ok, updated} ->
-                ensure_same_infinite_id!(updated, item_meta.id, id_field)
-                selectable? = Cinder.Selection.item_selectable?(selectable, updated)
-                item_meta = %{item_meta | selectable?: selectable?}
-
-                entry = %{
-                  record: updated,
-                  id: item_meta.id,
-                  number: item_meta.number,
-                  keyset: item_meta.keyset,
-                  selectable?: selectable?
-                }
-
-                {item_meta, [entry | entries]}
-
-              :error ->
-                {item_meta, entries}
-            end
-          end)
-
-        {refresh_infinite_page_meta(page, items), entries}
-      end)
-
-    selectable_ids =
-      pages
-      |> Enum.flat_map(& &1.selectable_ids)
-      |> MapSet.new()
-
-    socket
-    |> maybe_stream_items(Enum.reverse(entries), [])
-    |> assign(:infinite_pages, pages)
-    |> assign(:infinite_selectable_ids, selectable_ids)
-  end
-
-  # The footer reads page.results and page.count
-  defp drop_removed_from_page(%{results: _} = page, updated_data, removed) do
-    page = %{page | results: updated_data}
-
-    case Map.get(page, :count) do
-      count when is_integer(count) -> %{page | count: max(count - removed, 0)}
-      _ -> page
-    end
-  end
-
-  defp drop_removed_from_page(page, _updated_data, _removed), do: page
-
-  defp drop_removed_from_count(%{assigns: %{total_count: count}} = socket, removed)
-       when is_integer(count),
-       do: assign(socket, :total_count, max(count - removed, 0))
-
-  defp drop_removed_from_count(socket, _removed), do: socket
-
-  defp remove_infinite_items(socket, id_set) do
-    removed_visible_ids = MapSet.intersection(socket.assigns.infinite_item_ids, id_set)
-
-    pages =
-      socket.assigns.infinite_pages
-      |> Enum.map(fn page ->
-        items = Enum.reject(page.items, &MapSet.member?(id_set, &1.id))
-        refresh_infinite_page_meta(page, items)
-      end)
-      |> Enum.reject(&(&1.items == []))
-
-    item_ids = pages |> Enum.flat_map(& &1.ids) |> MapSet.new()
-
-    selectable_ids =
-      pages
-      |> Enum.flat_map(& &1.selectable_ids)
-      |> MapSet.new()
-
-    first_page = List.first(pages)
-    last_page = List.last(pages)
-    {range_start, range_end} = infinite_range(pages, socket.assigns.page_size)
-
-    socket
-    |> maybe_stream_delete_items(removed_visible_ids)
-    |> assign(:infinite_pages, pages)
-    |> assign(:infinite_item_ids, item_ids)
-    |> assign(:infinite_selectable_ids, selectable_ids)
-    |> assign(:infinite_loaded_count, MapSet.size(item_ids))
-    |> assign(:infinite_range_start, range_start)
-    |> assign(:infinite_range_end, range_end)
-    |> assign(:first_keyset, first_page && first_page.first_keyset)
-    |> assign(:last_keyset, last_page && last_page.last_keyset)
-    |> prune_silent_refresh_removed_items(id_set)
-  end
-
-  defp prune_silent_refresh_removed_items(
-         %{assigns: %{silent_refresh_state: state}} = socket,
-         id_set
-       )
-       when is_map(state) do
-    pages =
-      state
-      |> Map.get(:infinite_pages, [])
-      |> Enum.map(fn page ->
-        items = Enum.reject(page.items, &MapSet.member?(id_set, &1.id))
-        refresh_infinite_page_meta(page, items)
-      end)
-      |> Enum.reject(&(&1.items == []))
-
-    item_ids = pages |> Enum.flat_map(& &1.ids) |> MapSet.new()
-    selectable_ids = pages |> Enum.flat_map(& &1.selectable_ids) |> MapSet.new()
-    first_page = List.first(pages)
-    last_page = List.last(pages)
-    {range_start, range_end} = infinite_range(pages, socket.assigns.page_size)
-
-    state =
-      Map.merge(state, %{
-        infinite_pages: pages,
-        infinite_item_ids: item_ids,
-        infinite_selectable_ids: selectable_ids,
-        infinite_loaded_count: MapSet.size(item_ids),
-        infinite_range_start: range_start,
-        infinite_range_end: range_end,
-        first_keyset: first_page && first_page.first_keyset,
-        last_keyset: last_page && last_page.last_keyset
-      })
-
-    assign(socket, :silent_refresh_state, state)
-  end
-
-  defp prune_silent_refresh_removed_items(socket, _id_set), do: socket
-
-  defp maybe_stream_delete_items(
-         %{private: %{lifecycle: _}, assigns: %{streams: %{items: _}}} = socket,
-         ids
-       ) do
-    Enum.reduce(ids, socket, fn id, socket ->
-      stream_delete_by_dom_id(socket, :items, "#{socket.assigns.id}-item-#{id}")
-    end)
-  end
-
-  defp maybe_stream_delete_items(socket, _ids), do: socket
-
-  defp ensure_same_infinite_id!(item, expected_id, id_field) do
-    if to_string(Map.get(item, id_field)) != expected_id do
-      raise ArgumentError,
-            "an infinite stream update must preserve the #{inspect(id_field)} field"
+      {:ok, assign(socket, :data, updated_data)}
     end
   end
 
@@ -438,14 +238,6 @@ defmodule Cinder.LiveComponent do
   end
 
   defp to_map_by_id(items, _id_field) when is_map(items), do: items
-
-  defp to_map_by_normalized_id(items, id_field) when is_list(items) do
-    Map.new(items, &{to_string(Map.get(&1, id_field)), &1})
-  end
-
-  defp to_map_by_normalized_id(items, _id_field) when is_map(items) do
-    Map.new(items, fn {id, item} -> {to_string(id), item} end)
-  end
 
   @impl true
   def render(assigns) do
@@ -517,26 +309,6 @@ defmodule Cinder.LiveComponent do
   end
 
   @impl true
-  def handle_event("load_more", _params, socket) do
-    {:noreply, maybe_load_infinite(socket, :append)}
-  end
-
-  @impl true
-  def handle_event("load_previous", _params, socket) do
-    {:noreply, maybe_load_infinite(socket, :prepend)}
-  end
-
-  @impl true
-  def handle_event("retry_load_more", _params, socket) do
-    if socket.assigns.pagination_mode == :infinite and socket.assigns.error and
-         not socket.assigns.loading do
-      {:noreply, socket |> assign(:error, false) |> load_data()}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
   def handle_event("change_page_size", %{"page_size" => page_size}, socket) do
     with {parsed, ""} <- Integer.parse(to_string(page_size)),
          validated when validated == parsed <-
@@ -551,8 +323,6 @@ defmodule Cinder.LiveComponent do
         # Clear keyset cursors to restart from beginning when page size changes
         |> assign(:after_keyset, nil)
         |> assign(:before_keyset, nil)
-        |> assign(:infinite_append?, false)
-        |> mark_infinite_reset()
         |> notify_state_change()
         |> load_data()
 
@@ -564,17 +334,12 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_filter", %{"key" => "search"}, socket) do
-    previous_scope = selection_scope_state(socket.assigns)
-
     socket =
       socket
       |> assign(:search_term, "")
       |> assign(:current_page, 1)
       |> assign(:after_keyset, nil)
       |> assign(:before_keyset, nil)
-      |> assign(:infinite_append?, false)
-      |> mark_infinite_reset()
-      |> maybe_invalidate_selection_scope(previous_scope)
       |> load_data()
       |> notify_state_change()
 
@@ -583,104 +348,66 @@ defmodule Cinder.LiveComponent do
 
   @impl true
   def handle_event("clear_filter", %{"key" => key}, socket) do
-    previous_scope = selection_scope_state(socket.assigns)
-
     new_filters = Cinder.FilterManager.clear_filter(socket.assigns.filters, key)
 
     # Also clear the autocomplete search term for this field
-    raw_filter_params = Map.get(socket.assigns, :raw_filter_params, %{})
+    old_raw_filter_params = Map.get(socket.assigns, :raw_filter_params, %{})
     autocomplete_search_key = "#{key}_autocomplete_search"
-    raw_filter_params = Map.delete(raw_filter_params, autocomplete_search_key)
+    raw_filter_params = Map.delete(old_raw_filter_params, autocomplete_search_key)
 
-    socket =
-      socket
-      |> assign(:filters, new_filters)
-      |> assign(:raw_filter_params, raw_filter_params)
-      |> assign(:current_page, 1)
-      |> assign(:after_keyset, nil)
-      |> assign(:before_keyset, nil)
-      |> assign(:infinite_append?, false)
-      |> mark_infinite_reset()
-      |> maybe_invalidate_selection_scope(previous_scope)
-      |> load_data()
+    # Clearing an input that holds only a partially entered value changes nothing here
+    if new_filters == socket.assigns.filters and raw_filter_params == old_raw_filter_params do
+      {:noreply, socket}
+    else
+      socket =
+        socket
+        |> assign(:filters, new_filters)
+        |> assign(:raw_filter_params, raw_filter_params)
+        |> assign(:current_page, 1)
+        |> assign(:after_keyset, nil)
+        |> assign(:before_keyset, nil)
+        |> load_data()
 
-    socket = notify_state_change(socket, new_filters)
+      socket = notify_state_change(socket, new_filters)
 
-    {:noreply, socket}
+      {:noreply, socket}
+    end
   end
 
   @impl true
   def handle_event("toggle_sort", %{"key" => key}, socket) do
-    current_sort = socket.assigns.sort_by
-
-    # Find the column to get its sort cycle configuration
-    column = Enum.find(socket.assigns.col, &(&1.field == key))
-    sort_cycle = if column, do: column.sort_cycle, else: nil
-
-    new_sort =
-      Cinder.QueryBuilder.toggle_sort_with_cycle(
-        current_sort,
-        key,
-        sort_cycle,
-        socket.assigns.sort_mode
-      )
-
-    # Check if URL sync is enabled
-    url_sync_enabled = !!socket.assigns[:on_state_change]
-
-    socket =
-      socket
-      |> assign(:sort_by, new_sort)
-      |> assign(:current_page, 1)
-      |> assign(:after_keyset, nil)
-      |> assign(:before_keyset, nil)
-      |> assign(:infinite_append?, false)
-      |> mark_infinite_reset()
-      |> assign(:user_has_interacted, true)
-
-    socket =
-      if url_sync_enabled do
-        assign(socket, :__reload_requested__, true)
-      else
-        load_data(socket)
-      end
-
-    socket = notify_state_change(socket)
-
-    {:noreply, socket}
+    # The key is client-supplied. Anything that isn't a declared sortable column
+    # is ignored: otherwise it reaches query validation, which would mint an atom
+    # per distinct key (atom exhaustion) and let clients sort by hidden fields.
+    case Enum.find(socket.assigns.columns, &(&1.field == key)) do
+      %{sortable: true} = column -> {:noreply, toggle_sort(socket, column)}
+      _ -> {:noreply, socket}
+    end
   end
 
   @impl true
   def handle_event("refresh", _params, socket) do
-    socket =
-      if socket.assigns.pagination_mode == :infinite do
-        reset_infinite_pagination(socket)
-      else
-        socket
-      end
-
     {:noreply, load_data(socket)}
   end
 
   @impl true
   def handle_event("clear_all_filters", _params, socket) do
-    previous_scope = selection_scope_state(socket.assigns)
-
     new_filters = Cinder.FilterManager.clear_all_filters(socket.assigns.filters)
 
-    socket =
-      socket
-      |> assign(:filters, new_filters)
-      |> assign(:current_page, 1)
-      |> assign(:after_keyset, nil)
-      |> assign(:before_keyset, nil)
-      |> assign(:infinite_append?, false)
-      |> mark_infinite_reset()
-      |> maybe_invalidate_selection_scope(previous_scope)
-      |> load_data()
-      |> notify_state_change()
+    if new_filters == socket.assigns.filters do
+      {:noreply, socket}
+    else
+      socket =
+        socket
+        |> assign(:filters, new_filters)
+        |> assign(:current_page, 1)
+        |> assign(:after_keyset, nil)
+        |> assign(:before_keyset, nil)
+        |> load_data()
+        |> notify_state_change()
 
-    {:noreply, socket}
+      {:noreply, socket}
+    end
   end
 
   # ============================================================================
@@ -688,14 +415,17 @@ defmodule Cinder.LiveComponent do
   # ============================================================================
 
   @impl true
-  def handle_event("toggle_select", _params, %{assigns: %{selection_loading: true}} = socket) do
-    {:noreply, socket}
-  end
-
   def handle_event("toggle_select", %{"id" => id}, socket) do
-    new_selected = toggle_selected_id(socket, id)
+    selected_ids = socket.assigns.selected_ids
 
-    if MapSet.equal?(new_selected, socket.assigns.selected_ids) do
+    new_selected =
+      cond do
+        MapSet.member?(selected_ids, id) -> MapSet.delete(selected_ids, id)
+        id_selectable?(socket, id) -> MapSet.put(selected_ids, id)
+        true -> selected_ids
+      end
+
+    if MapSet.equal?(new_selected, selected_ids) do
       {:noreply, socket}
     else
       socket =
@@ -708,20 +438,19 @@ defmodule Cinder.LiveComponent do
   end
 
   @impl true
-  def handle_event("toggle_select_all_page", _params, %{assigns: %{loading: true}} = socket) do
-    {:noreply, socket}
-  end
-
   def handle_event("toggle_select_all_page", _params, socket) do
     id_field = socket.assigns[:id_field] || :id
-    selectable = socket.assigns[:selectable] || false
+
+    selectable =
+      if socket.assigns[:select_all] == false,
+        do: false,
+        else: socket.assigns[:selectable] || false
 
     page_ids =
-      if Map.get(socket.assigns, :pagination_mode, :offset) == :infinite do
-        Map.get(socket.assigns, :infinite_selectable_ids, MapSet.new())
-      else
-        Cinder.Selection.page_ids(socket.assigns.data, id_field, selectable)
-      end
+      socket.assigns.data
+      |> Enum.filter(&Cinder.Selection.item_selectable?(selectable, &1))
+      |> Enum.map(&to_string(Map.get(&1, id_field)))
+      |> MapSet.new()
 
     all_selected? =
       not Enum.empty?(page_ids) and MapSet.subset?(page_ids, socket.assigns.selected_ids)
@@ -742,44 +471,10 @@ defmodule Cinder.LiveComponent do
   end
 
   @impl true
-  def handle_event("toggle_select_all", _params, socket)
-      when socket.assigns.loading or socket.assigns.selection_loading do
-    {:noreply, socket}
-  end
-
-  def handle_event("toggle_select_all", _params, socket) do
-    cond do
-      socket.assigns.selection_mode == :all_matching ->
-        socket =
-          if MapSet.size(socket.assigns.selected_ids) == 0 do
-            clear_selection_state(socket)
-          else
-            assign(socket, :selected_ids, MapSet.new())
-          end
-          |> notify_selection_change(:select_all)
-
-        {:noreply, socket}
-
-      socket.assigns.selectable == true ->
-        socket =
-          socket
-          |> assign(:selection_mode, :all_matching)
-          |> assign(:selected_ids, MapSet.new())
-          |> assign(:selection_scope_ids, nil)
-          |> notify_selection_change(:select_all)
-
-        {:noreply, socket}
-
-      true ->
-        toggle_materialized_select_all(socket)
-    end
-  end
-
-  @impl true
   def handle_event("clear_selection", _params, socket) do
     socket =
       socket
-      |> clear_selection_state()
+      |> assign(:selected_ids, MapSet.new())
       |> notify_selection_change(:clear)
 
     {:noreply, socket}
@@ -790,97 +485,24 @@ defmodule Cinder.LiveComponent do
   # ============================================================================
 
   @impl true
-  def handle_event("bulk_action_execute", %{"index" => index}, socket) do
+  # The index comes from the client, so it has to name one of the actions: a forged
+  # one (a string, a negative index aliasing the last action) does nothing
+  def handle_event("bulk_action_execute", %{"index" => index}, socket)
+      when is_integer(index) and index >= 0 do
     slots = socket.assigns[:bulk_action_slots] || []
     slot = Enum.at(slots, index)
 
-    cond do
-      is_nil(slot) ->
-        Logger.warning("Cinder: Bulk action slot not found at index #{index}")
-        {:noreply, socket}
-
-      slot[:confirmation] == :slot ->
-        {:noreply, socket}
-
-      true ->
-        case selection_snapshot(socket) do
-          {:ok, selection} -> execute_bulk_action(slot, selection, socket)
-          {:error, reason} -> handle_bulk_action_error(slot, socket, reason)
-        end
-    end
-  end
-
-  @impl true
-  def handle_event("bulk_action_confirm", _params, socket) do
-    slots = socket.assigns[:bulk_action_slots] || []
-
-    case socket.assigns[:bulk_action_confirmation] do
-      %{index: index, selection: selection, data: _data} ->
-        case Enum.at(slots, index) do
-          nil ->
-            Logger.warning("Cinder: Bulk action slot not found at index #{index}")
-            {:noreply, socket}
-
-          slot ->
-            execute_bulk_action(slot, selection, socket)
-        end
-
-      _not_ready ->
-        {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_event("bulk_action_prepare", %{"index" => index}, socket) do
-    slots = socket.assigns[:bulk_action_slots] || []
-
-    with slot when not is_nil(slot) <- Enum.at(slots, index),
-         false <- preparation_running?(socket.assigns[:bulk_action_confirmation], index),
-         true <- selection_active?(socket.assigns),
-         {:ok, selection} <- selection_snapshot(socket) do
-      attempt = make_ref()
-
-      context = %{
-        selected_ids: selection.selected_ids,
-        selected_count: selection.count,
-        selection_mode: selection.mode,
-        action: slot[:action]
-      }
-
-      confirmation = %{
-        index: index,
-        attempt: attempt,
-        selection: selection,
-        selected_ids: selection.selected_ids,
-        selected_count: selection.count,
-        selection_mode: selection.mode
-      }
-
-      socket = assign(socket, :bulk_action_confirmation, confirmation)
-
-      case slot[:prepare_confirmation] do
-        nil ->
-          {:noreply, put_confirmation_result(socket, index, attempt, {:ok, nil})}
-
-        callback ->
-          {:noreply,
-           start_async(socket, {:bulk_action_confirmation, index, attempt}, fn ->
-             Cinder.BulkActionConfirmation.prepare(callback, context)
-           end)}
-      end
+    if slot do
+      execute_bulk_action(slot, socket)
     else
-      nil ->
-        Logger.warning("Cinder: Bulk action slot not found at index #{index}")
-        {:noreply, socket}
-
-      _ignored ->
-        {:noreply, socket}
+      Logger.warning("Cinder: Bulk action slot not found at index #{index}")
+      {:noreply, socket}
     end
   end
 
-  @impl true
-  def handle_event("bulk_action_cancel", _params, socket) do
-    {:noreply, assign(socket, :bulk_action_confirmation, nil)}
+  def handle_event("bulk_action_execute", params, socket) do
+    Logger.warning("Cinder: Ignoring a bulk action with an invalid index: #{inspect(params)}")
+    {:noreply, socket}
   end
 
   @impl true
@@ -899,7 +521,7 @@ defmodule Cinder.LiveComponent do
         term -> term
       end
 
-    url_sync_enabled = !!socket.assigns[:on_state_change]
+    url_sync_enabled = socket.assigns[:url_sync] == true
 
     changed? = new_filters != socket.assigns.filters or search_term != socket.assigns.search_term
 
@@ -918,9 +540,6 @@ defmodule Cinder.LiveComponent do
           |> assign(:current_page, 1)
           |> assign(:after_keyset, nil)
           |> assign(:before_keyset, nil)
-          |> assign(:infinite_append?, false)
-          |> mark_infinite_reset()
-          |> invalidate_selection_scope()
 
         socket =
           if url_sync_enabled,
@@ -939,94 +558,97 @@ defmodule Cinder.LiveComponent do
   # BULK ACTION HELPERS
   # ============================================================================
 
-  defp toggle_materialized_select_all(socket) do
-    scope_ids = socket.assigns.selection_scope_ids
+  defp toggle_sort(socket, column) do
+    new_sort =
+      Cinder.QueryBuilder.toggle_sort_with_cycle(
+        socket.assigns.sort_by,
+        column.field,
+        column.sort_cycle,
+        socket.assigns.sort_mode
+      )
 
-    if is_struct(scope_ids, MapSet) and MapSet.subset?(scope_ids, socket.assigns.selected_ids) do
-      socket =
-        socket
-        |> assign(:selected_ids, MapSet.difference(socket.assigns.selected_ids, scope_ids))
-        |> notify_selection_change(:select_all)
+    # Check if URL sync is enabled
+    url_sync_enabled = socket.assigns[:url_sync] == true
 
+    socket =
+      socket
+      |> assign(:sort_by, new_sort)
+      |> assign(:current_page, 1)
+      |> assign(:after_keyset, nil)
+      |> assign(:before_keyset, nil)
+      |> assign(:user_has_interacted, true)
+
+    socket =
+      if url_sync_enabled do
+        assign(socket, :__reload_requested__, true)
+      else
+        load_data(socket)
+      end
+
+    notify_state_change(socket)
+  end
+
+  defp execute_bulk_action(slot, socket) do
+    action = slot[:action]
+    selected_ids = socket.assigns.selected_ids |> MapSet.to_list()
+
+    if selected_ids == [] do
       {:noreply, socket}
     else
-      attempt = make_ref()
-      socket = assign(socket, selection_attempt: attempt, selection_loading: true)
-      options = selection_query_options(socket)
-      resource = socket.assigns.query
-      id_field = socket.assigns.id_field
-      selectable = socket.assigns.selectable
+      resource = extract_resource(socket.assigns)
 
-      if Application.get_env(:ash, :disable_async?) do
-        result = Cinder.Selection.filtered_ids(resource, options, id_field, selectable)
-        {:noreply, apply_select_all_result(socket, attempt, result)}
+      if resource do
+        # The base query, not just its resource: its filters, tenant and read action
+        # bound what the action can touch, so a selected record that has since left
+        # the collection's scope isn't acted on
+        result =
+          Cinder.BulkActionExecutor.execute(action,
+            resource: socket.assigns.query,
+            ids: selected_ids,
+            id_field: socket.assigns[:id_field] || :id,
+            actor: socket.assigns[:actor],
+            tenant: socket.assigns[:tenant],
+            scope: socket.assigns[:scope],
+            action_opts: slot[:action_opts] || []
+          )
+
+        handle_bulk_action_result(result, slot, socket)
       else
-        {:noreply,
-         start_async(socket, {:select_all, attempt}, fn ->
-           Cinder.Selection.filtered_ids(resource, options, id_field, selectable)
-         end)}
+        Logger.error("Cinder: No resource configured for bulk action")
+        {:noreply, socket}
       end
     end
   end
 
-  defp selection_snapshot(%{assigns: %{selection_mode: :all_matching}} = socket) do
-    with {:ok, query} <-
-           Cinder.Selection.all_matching_query(
-             socket.assigns.query,
-             selection_query_options(socket)
-           ) do
-      {:ok,
-       %{
-         mode: :all_matching,
-         query: query,
-         selected_ids: socket.assigns.selected_ids,
-         count: selected_count(socket.assigns)
-       }}
-    end
-  end
-
-  defp selection_snapshot(socket) do
-    {:ok,
-     %{
-       mode: :explicit,
-       selected_ids: socket.assigns.selected_ids,
-       count: MapSet.size(socket.assigns.selected_ids)
-     }}
-  end
-
-  defp execute_bulk_action(slot, selection, socket) do
-    action = slot[:action]
-    resource = extract_resource(socket.assigns)
-
-    if resource do
-      result = execute_selection(action, selection, resource, slot, socket)
-      handle_bulk_action_result(result, slot, selection, socket)
-    else
-      Logger.error("Cinder: No resource configured for bulk action")
-      {:noreply, socket}
-    end
-  end
-
-  defp handle_bulk_action_result(result, slot, selection, socket) do
+  defp handle_bulk_action_result(result, slot, socket) do
     case result do
       {:ok, bulk_result} ->
-        handle_bulk_action_success(slot, selection, socket, bulk_result)
+        handle_bulk_action_success(slot, socket, bulk_result)
 
       {:error, reason} ->
         handle_bulk_action_error(slot, socket, reason)
+
+      # Some records changed and some didn't: an error, but the data and selection
+      # are stale either way (without `return_records?` there's no telling which ids
+      # failed, and keeping them would re-apply the action to the ones that worked)
+      {:partial_success, %Ash.BulkResult{errors: errors}} ->
+        socket =
+          socket
+          |> assign(:selected_ids, MapSet.new())
+          |> notify_selection_change(:clear)
+          |> load_data()
+
+        handle_bulk_action_error(slot, socket, errors || [], partial: true)
     end
   end
 
-  defp handle_bulk_action_success(slot, selection, socket, result) do
-    remaining_ids = MapSet.difference(socket.assigns.selected_ids, selection.selected_ids)
+  defp handle_bulk_action_success(slot, socket, result) do
+    selected_count = MapSet.size(socket.assigns.selected_ids)
 
     socket =
       socket
-      |> assign(:bulk_action_confirmation, nil)
-      |> assign(:selected_ids, remaining_ids)
-      |> clear_executed_selection(selection.mode)
+      |> assign(:selected_ids, MapSet.new())
       |> notify_selection_change(:clear)
-      |> maybe_reset_infinite_pagination()
       |> load_data()
 
     if event_name = slot[:on_success] do
@@ -1036,7 +658,7 @@ defmodule Cinder.LiveComponent do
          %{
            component_id: socket.assigns.id,
            action: slot[:action],
-           count: selection.count,
+           count: selected_count,
            result: result
          }}
       )
@@ -1045,38 +667,12 @@ defmodule Cinder.LiveComponent do
     {:noreply, socket}
   end
 
-  defp clear_executed_selection(socket, :all_matching), do: clear_selection_state(socket)
-  defp clear_executed_selection(socket, _explicit), do: invalidate_selection_scope(socket)
+  defp handle_bulk_action_error(slot, socket, reason, opts \\ []) do
+    partial? = Keyword.get(opts, :partial, false)
 
-  defp execute_selection(action, %{mode: :all_matching} = selection, resource, slot, socket) do
-    Cinder.BulkActionExecutor.execute(action,
-      resource: resource,
-      query: selection.query,
-      exclude_ids: MapSet.to_list(selection.selected_ids),
-      id_field: socket.assigns[:id_field] || :id,
-      actor: socket.assigns[:actor],
-      tenant: socket.assigns[:tenant],
-      scope: socket.assigns[:scope],
-      action_opts: slot[:action_opts] || []
+    Logger.error(
+      "Cinder: Bulk action #{if partial?, do: "partly failed", else: "failed"}: #{inspect(reason)}"
     )
-  end
-
-  defp execute_selection(action, selection, resource, slot, socket) do
-    Cinder.BulkActionExecutor.execute(action,
-      resource: resource,
-      ids: MapSet.to_list(selection.selected_ids),
-      id_field: socket.assigns[:id_field] || :id,
-      actor: socket.assigns[:actor],
-      tenant: socket.assigns[:tenant],
-      scope: socket.assigns[:scope],
-      action_opts: slot[:action_opts] || []
-    )
-  end
-
-  defp handle_bulk_action_error(slot, socket, reason) do
-    Logger.error("Cinder: Bulk action failed: #{inspect(reason)}")
-
-    socket = put_confirmation_error(socket, reason)
 
     if event_name = slot[:on_error] do
       send(
@@ -1085,44 +681,13 @@ defmodule Cinder.LiveComponent do
          %{
            component_id: socket.assigns.id,
            action: slot[:action],
-           reason: reason
+           reason: reason,
+           partial: partial?
          }}
       )
     end
 
     {:noreply, socket}
-  end
-
-  defp preparation_running?(%{index: index} = confirmation, index) do
-    not Map.has_key?(confirmation, :data) and not Map.has_key?(confirmation, :error)
-  end
-
-  defp preparation_running?(_confirmation, _index), do: false
-
-  defp put_confirmation_result(socket, index, attempt, result) do
-    case socket.assigns[:bulk_action_confirmation] do
-      %{index: ^index, attempt: ^attempt} = confirmation ->
-        confirmation =
-          case result do
-            {:ok, data} -> Map.put(confirmation, :data, data)
-            {:error, reason} -> Map.put(confirmation, :error, reason)
-          end
-
-        assign(socket, :bulk_action_confirmation, confirmation)
-
-      _other ->
-        socket
-    end
-  end
-
-  defp put_confirmation_error(socket, reason) do
-    case socket.assigns[:bulk_action_confirmation] do
-      %{index: _index} = confirmation ->
-        assign(socket, :bulk_action_confirmation, Map.put(confirmation, :error, reason))
-
-      _other ->
-        socket
-    end
   end
 
   defp extract_resource(assigns) do
@@ -1132,6 +697,18 @@ defmodule Cinder.LiveComponent do
       _ -> nil
     end
   end
+
+  # The footer reads page.results and page.count
+  defp drop_removed_from_page(%{results: _} = page, updated_data, removed) do
+    page = %{page | results: updated_data}
+
+    case Map.get(page, :count) do
+      count when is_integer(count) -> %{page | count: max(count - removed, 0)}
+      _ -> page
+    end
+  end
+
+  defp drop_removed_from_page(page, _updated_data, _removed), do: page
 
   # A removal that empties the page reads it again, so the following rows move up
   # instead of the empty state showing. If the emptied page was the last offset page,
@@ -1152,6 +729,28 @@ defmodule Cinder.LiveComponent do
       load_data(socket)
     end
   end
+
+  # A column's slot (or a raw slot's inner_block) is a HEEx closure over the parent
+  # LiveView's assigns. The query never reads it, and carrying it into the async load
+  # copies those assigns into the task once per column (process copies do not keep
+  # sharing), which reached gigabytes on a busy page.
+  defp without_slots(columns) do
+    Enum.map(columns, fn column ->
+      column |> Map.delete(:inner_block) |> Map.replace(:slot, nil)
+    end)
+  end
+
+  # Taken from the display columns: query_columns only has filterable and searchable ones
+  defp tiebreakers(columns) do
+    for %{sortable: true, field: field, sort_then: [_ | _] = then} <- columns,
+        into: %{},
+        do: {field, then}
+  end
+
+  # The columns' inferred loads go in alongside any explicit ones: `Ash.Query.load/2`
+  # merges each `:load`, so neither replaces the other
+  defp with_loads(query_opts, []), do: query_opts
+  defp with_loads(query_opts, loads), do: query_opts ++ [load: loads]
 
   defp maybe_notify_query_change(socket, nil), do: socket
 
@@ -1184,69 +783,18 @@ defmodule Cinder.LiveComponent do
     selectable = socket.assigns[:selectable] || false
     id_field = socket.assigns[:id_field] || :id
 
-    if Map.get(socket.assigns, :pagination_mode, :offset) == :infinite do
-      MapSet.member?(Map.get(socket.assigns, :infinite_selectable_ids, MapSet.new()), id)
-    else
-      case Enum.find(socket.assigns.data, &(to_string(Map.get(&1, id_field)) == id)) do
-        nil -> false
-        item -> Cinder.Selection.item_selectable?(selectable, item)
-      end
+    case Enum.find(socket.assigns.data, &(to_string(Map.get(&1, id_field)) == id)) do
+      nil -> false
+      item -> Cinder.Selection.item_selectable?(selectable, item)
     end
   end
-
-  defp toggle_selected_id(%{assigns: %{selection_mode: :all_matching}} = socket, id) do
-    selected_ids = socket.assigns.selected_ids
-
-    cond do
-      MapSet.member?(selected_ids, id) -> MapSet.delete(selected_ids, id)
-      id_selectable?(socket, id) -> MapSet.put(selected_ids, id)
-      true -> selected_ids
-    end
-  end
-
-  defp toggle_selected_id(socket, id) do
-    selected_ids = socket.assigns.selected_ids
-
-    cond do
-      MapSet.member?(selected_ids, id) -> MapSet.delete(selected_ids, id)
-      id_selectable?(socket, id) -> MapSet.put(selected_ids, id)
-      true -> selected_ids
-    end
-  end
-
-  defp clear_selection_state(socket) do
-    socket
-    |> assign(:selection_mode, :explicit)
-    |> assign(:selected_ids, MapSet.new())
-    |> assign(:selection_scope_ids, nil)
-    |> assign(:selection_attempt, nil)
-    |> assign(:selection_loading, false)
-  end
-
-  defp selected_count(%{selection_mode: :all_matching} = assigns) do
-    total_count = assigns[:total_count] || (assigns[:page] && Map.get(assigns.page, :count))
-
-    case total_count do
-      count when is_integer(count) ->
-        max(count - MapSet.size(assigns.selected_ids), 0)
-
-      _unknown ->
-        nil
-    end
-  end
-
-  defp selected_count(assigns), do: MapSet.size(assigns.selected_ids)
-
-  defp selection_active?(%{selection_mode: :all_matching}), do: true
-  defp selection_active?(assigns), do: MapSet.size(assigns.selected_ids) > 0
 
   defp notify_selection_change(socket, action) do
     if event_name = socket.assigns[:on_selection_change] do
       payload = %{
         component_id: socket.assigns.id,
         selected_ids: socket.assigns.selected_ids,
-        selected_count: selected_count(socket.assigns),
-        selection_mode: Map.get(socket.assigns, :selection_mode, :explicit),
+        selected_count: MapSet.size(socket.assigns.selected_ids),
         action: action
       }
 
@@ -1259,24 +807,6 @@ defmodule Cinder.LiveComponent do
   # ============================================================================
   # ASYNC HANDLERS
   # ============================================================================
-
-  @impl true
-  def handle_async(
-        {:bulk_action_confirmation, index, attempt},
-        {:ok, result},
-        socket
-      ) do
-    {:noreply, put_confirmation_result(socket, index, attempt, result)}
-  end
-
-  @impl true
-  def handle_async(
-        {:bulk_action_confirmation, index, attempt},
-        {:exit, reason},
-        socket
-      ) do
-    {:noreply, put_confirmation_result(socket, index, attempt, {:error, reason})}
-  end
 
   def handle_async(:load_data, {:ok, {{:ok, page}, query}}, socket) do
     socket =
@@ -1298,16 +828,6 @@ defmodule Cinder.LiveComponent do
     {:noreply, handle_result({:exit, reason}, socket)}
   end
 
-  @impl true
-  def handle_async({:select_all, attempt}, {:ok, result}, socket) do
-    {:noreply, apply_select_all_result(socket, attempt, result)}
-  end
-
-  @impl true
-  def handle_async({:select_all, attempt}, {:exit, reason}, socket) do
-    {:noreply, apply_select_all_result(socket, attempt, {:error, reason})}
-  end
-
   # A result from a superseded count never arrives here: LiveView drops it,
   # because each `start_async(:load_count, ...)` replaces the one before.
   @impl true
@@ -1321,21 +841,15 @@ defmodule Cinder.LiveComponent do
   end
 
   defp handle_result({:ok, page}, socket) do
-    socket = store_page_count(socket, page)
-
-    if Map.get(socket.assigns, :pagination_mode, :offset) == :infinite do
-      put_infinite_page(socket, page)
-    else
-      socket
-      |> assign(:loading, false)
-      |> assign(:silent, false)
-      |> assign(:error, false)
-      |> assign(:data, page.results)
-      |> assign(:page, page)
-      |> assign(:infinite_append?, false)
-      |> maybe_update_keyset_cursors(page)
-    end
-    |> assign(:silent_refresh_state, nil)
+    socket
+    |> store_page_count(page)
+    |> assign(:loading, false)
+    |> assign(:silent, false)
+    |> assign(:error, false)
+    |> assign(:data, page.results)
+    |> assign(:page, page)
+    # Update keyset cursors for navigation (only read in keyset mode)
+    |> update_keyset_cursors(page)
   end
 
   defp handle_result({:error, error}, socket) do
@@ -1368,50 +882,33 @@ defmodule Cinder.LiveComponent do
     handle_load_error(socket)
   end
 
-  defp maybe_restore_silent_refresh_state(%{assigns: %{silent_refresh_state: state}} = socket)
-       when is_map(state),
-       do: assign(socket, state)
-
-  defp maybe_restore_silent_refresh_state(socket), do: socket
-
-  defp refreshable_data_present?(socket) do
-    socket.assigns[:data] not in [nil, []] or
-      (socket.assigns[:infinite_loaded_count] || 0) > 0
-  end
-
   defp handle_load_error(socket) do
-    cond do
-      socket.assigns.silent ->
-        socket
-        |> maybe_restore_silent_refresh_state()
-        |> assign(:loading, false)
-        |> assign(:silent, false)
-        |> assign(:silent_refresh_state, nil)
-        |> assign(:error, false)
-
-      socket.assigns.pagination_mode == :infinite and socket.assigns.infinite_append? and
-          socket.assigns.infinite_loaded_count > 0 ->
-        socket
-        |> assign(:loading, false)
-        |> assign(:error, true)
-
-      true ->
-        socket
-        |> assign(:loading, false)
-        |> assign(:error, true)
-        |> assign(:data, [])
-        |> assign(:page, nil)
-        |> assign(:infinite_append?, false)
+    if socket.assigns.silent do
+      socket
+      |> assign(:loading, false)
+      |> assign(:silent, false)
+      |> assign(:error, false)
+    else
+      socket
+      |> assign(:loading, false)
+      |> assign(:error, true)
+      |> assign(:data, [])
+      |> assign(:page, nil)
     end
   end
 
-  defp maybe_update_keyset_cursors(socket, %Ash.Page.Keyset{} = page) do
-    socket
-    |> assign(:first_keyset, get_keyset_from_result(List.first(page.results)))
-    |> assign(:last_keyset, get_keyset_from_result(List.last(page.results)))
-  end
+  # Not just `Ash.Page.Keyset`: keyset mode's first page can arrive as an
+  # `Ash.Page.Offset` (Ash falls back to the app's `default_page_type` when there's
+  # no cursor), and its records still carry keyset metadata.
+  defp update_keyset_cursors(socket, %{results: results}) do
+    # Extract keysets from first and last results for navigation
+    first_keyset = get_keyset_from_result(List.first(results))
+    last_keyset = get_keyset_from_result(List.last(results))
 
-  defp maybe_update_keyset_cursors(socket, _page), do: socket
+    socket
+    |> assign(:first_keyset, first_keyset)
+    |> assign(:last_keyset, last_keyset)
+  end
 
   defp get_keyset_from_result(nil), do: nil
 
@@ -1422,304 +919,6 @@ defmodule Cinder.LiveComponent do
     end
   end
 
-  defp put_infinite_page(socket, page) do
-    direction = socket.assigns.infinite_direction
-    page_number = socket.assigns.current_page
-    id_field = socket.assigns.id_field
-    selectable = socket.assigns.selectable
-
-    existing_ids =
-      if direction == :reset, do: MapSet.new(), else: socket.assigns.infinite_item_ids
-
-    number_start = infinite_number_start(socket, direction, length(page.results))
-
-    entries =
-      page.results
-      |> Enum.with_index(number_start)
-      |> Enum.map(fn {item, number} ->
-        id = to_string(Map.get(item, id_field))
-
-        %{
-          record: item,
-          id: id,
-          number: number,
-          keyset: get_keyset_from_result(item),
-          selectable?: Cinder.Selection.item_selectable?(selectable, item)
-        }
-      end)
-      |> Enum.reject(&MapSet.member?(existing_ids, &1.id))
-
-    stream_entries = if direction == :prepend, do: Enum.reverse(entries), else: entries
-
-    # Every batch read stays in the browser: the stream has no limit, so nothing loaded is
-    # dropped from the page while the reader scrolls.
-    stream_opts = [at: if(direction == :prepend, do: 0, else: -1), reset: direction == :reset]
-
-    # A read of several batches (a first load with its overscan) is kept as those batches.
-    pages =
-      entries
-      |> infinite_batches(socket.assigns.page_size)
-      |> Enum.with_index(page_number)
-      |> Enum.reduce(socket.assigns.infinite_pages, fn {batch, number}, pages ->
-        batch_direction = if number == page_number, do: direction, else: :append
-        update_infinite_pages(pages, build_infinite_page_meta(number, batch), batch_direction)
-      end)
-
-    item_ids = pages |> Enum.flat_map(& &1.ids) |> MapSet.new()
-
-    selectable_ids =
-      pages
-      |> Enum.flat_map(& &1.selectable_ids)
-      |> MapSet.new()
-
-    first_page = List.first(pages)
-    last_page = List.last(pages)
-    {range_start, range_end} = infinite_range(pages, socket.assigns.page_size)
-
-    socket
-    |> maybe_stream_items(stream_entries, stream_opts)
-    |> assign(:loading, false)
-    |> assign(:error, false)
-    |> assign(:data, [])
-    |> assign(:page, strip_page_results(page))
-    |> assign(:infinite_pages, pages)
-    |> assign(:infinite_item_ids, item_ids)
-    |> assign(:infinite_selectable_ids, selectable_ids)
-    |> assign(:infinite_loaded_count, MapSet.size(item_ids))
-    |> assign(:infinite_range_start, range_start)
-    |> assign(:infinite_range_end, range_end)
-    |> assign(:first_keyset, first_page && first_page.first_keyset)
-    |> assign(:last_keyset, last_page && last_page.last_keyset)
-    |> update_infinite_boundaries(page, direction)
-    |> assign(:infinite_append?, false)
-    |> assign(:infinite_direction, :append)
-    |> maybe_schedule_infinite_prefetch()
-  end
-
-  defp strip_page_results(%Ash.Page.Keyset{} = page), do: %{page | results: []}
-  defp strip_page_results(%Ash.Page.Offset{} = page), do: %{page | results: []}
-  defp strip_page_results(page), do: page
-
-  defp maybe_stream_items(%{private: %{lifecycle: _}} = socket, entries, opts) do
-    stream(socket, :items, entries, opts)
-  end
-
-  defp maybe_stream_items(socket, _entries, _opts), do: socket
-
-  defp infinite_number_start(_socket, :reset, _result_count), do: 1
-
-  defp infinite_number_start(socket, :prepend, result_count) do
-    max(socket.assigns.infinite_range_start - result_count, 1)
-  end
-
-  defp infinite_number_start(socket, _direction, _result_count) do
-    max(socket.assigns.infinite_range_end + 1, 1)
-  end
-
-  # An empty read still resets the batches it would have replaced.
-  defp infinite_batches([], _page_size), do: [[]]
-  defp infinite_batches(entries, page_size), do: Enum.chunk_every(entries, page_size)
-
-  defp build_infinite_page_meta(page_number, entries) do
-    items = Enum.map(entries, &Map.take(&1, [:id, :keyset, :number, :selectable?]))
-    refresh_infinite_page_meta(%{page: page_number}, items)
-  end
-
-  defp refresh_infinite_page_meta(page, items) do
-    page
-    |> Map.put(:items, items)
-    |> Map.put(:ids, Enum.map(items, & &1.id))
-    |> Map.put(:selectable_ids, items |> Enum.filter(& &1.selectable?) |> Enum.map(& &1.id))
-    |> Map.put(:first_keyset, items |> List.first() |> then(&(&1 && &1.keyset)))
-    |> Map.put(:last_keyset, items |> List.last() |> then(&(&1 && &1.keyset)))
-  end
-
-  # Batches only gather: every one read stays, before or after those already loaded.
-  defp update_infinite_pages(_pages, %{items: []}, :reset), do: []
-  defp update_infinite_pages(pages, %{items: []}, _direction), do: pages
-  defp update_infinite_pages(_pages, page_meta, :reset), do: [page_meta]
-  defp update_infinite_pages(pages, page_meta, :prepend), do: [page_meta | pages]
-  defp update_infinite_pages(pages, page_meta, _direction), do: pages ++ [page_meta]
-
-  defp update_infinite_boundaries(socket, page, :reset) do
-    before? = not is_nil(socket.assigns.before_keyset)
-    after? = not is_nil(socket.assigns.after_keyset)
-
-    socket
-    |> assign(:infinite_has_previous, if(before?, do: has_more_results?(page), else: after?))
-    |> assign(:infinite_has_next, before? or has_more_results?(page))
-  end
-
-  # A read before the first row loaded says whether more lies before it, one after the last
-  # whether more follows; the other end stays as it was, since nothing loaded is dropped.
-  defp update_infinite_boundaries(socket, page, :prepend),
-    do: assign(socket, :infinite_has_previous, has_more_results?(page))
-
-  defp update_infinite_boundaries(socket, page, _direction),
-    do: assign(socket, :infinite_has_next, has_more_results?(page))
-
-  defp infinite_range([], _page_size), do: {0, 0}
-
-  defp infinite_range(pages, _page_size) do
-    first_item = pages |> List.first() |> Map.fetch!(:items) |> List.first()
-    last_item = pages |> List.last() |> Map.fetch!(:items) |> List.last()
-    {first_item.number, last_item.number}
-  end
-
-  # The batches an infinite collection keeps ahead of the reader: the one shown and its overscan.
-  defp infinite_batches_ahead(socket), do: 1 + socket.assigns.overscan
-
-  # Where the prefetch would fill the batches kept ahead (a connected collection loading on its
-  # own), its first load from the top reads them all in one query instead. A load at a cursor (a
-  # restored URL), a manual collection's and every later load read one batch.
-  defp read_size(
-         %{
-           assigns: %{
-             pagination_mode: :infinite,
-             infinite_load: :automatic,
-             infinite_direction: :reset,
-             after_keyset: nil,
-             before_keyset: nil
-           }
-         } = socket
-       ) do
-    if connected?(socket),
-      do: socket.assigns.page_size * infinite_batches_ahead(socket),
-      else: socket.assigns.page_size
-  end
-
-  defp read_size(socket), do: socket.assigns.page_size
-
-  defp maybe_schedule_infinite_prefetch(socket) do
-    if socket.assigns.infinite_load == :automatic and connected?(socket) and
-         not socket.assigns.infinite_prefetch_scheduled? and
-         length(socket.assigns.infinite_pages) < infinite_batches_ahead(socket) and
-         socket.assigns.infinite_has_next do
-      send_update(__MODULE__, id: socket.assigns.id, __infinite_prefetch__: true)
-      assign(socket, :infinite_prefetch_scheduled?, true)
-    else
-      socket
-    end
-  end
-
-  defp maybe_start_infinite_prefetch(socket) do
-    socket
-    |> assign(:infinite_prefetch_scheduled?, false)
-    |> maybe_load_infinite(:append)
-  end
-
-  defp maybe_load_infinite(socket, direction) do
-    can_load? =
-      socket.assigns.pagination_mode == :infinite and not socket.assigns.loading and
-        not socket.assigns.error
-
-    case {can_load?, direction, socket.assigns.infinite_pages} do
-      {true, :append, pages} when pages != [] ->
-        last = List.last(pages)
-
-        if socket.assigns.infinite_has_next and not is_nil(last.last_keyset) do
-          socket
-          |> assign(:current_page, last.page + 1)
-          |> assign(:after_keyset, last.last_keyset)
-          |> assign(:before_keyset, nil)
-          |> assign(:infinite_append?, true)
-          |> assign(:infinite_direction, :append)
-          |> notify_state_change()
-          |> load_data()
-        else
-          socket
-        end
-
-      {true, :prepend, [first | _]} ->
-        if socket.assigns.infinite_has_previous and not is_nil(first.first_keyset) do
-          socket
-          |> assign(:current_page, max(first.page - 1, 1))
-          |> assign(:before_keyset, first.first_keyset)
-          |> assign(:after_keyset, nil)
-          |> assign(:infinite_append?, true)
-          |> assign(:infinite_direction, :prepend)
-          |> notify_state_change()
-          |> load_data()
-        else
-          socket
-        end
-
-      _ ->
-        socket
-    end
-  end
-
-  defp has_more_results?(%{more?: more?}), do: more?
-  defp has_more_results?(_page), do: false
-
-  defp mark_infinite_reset(socket) do
-    socket
-    |> clear_stale_items()
-    |> assign(:infinite_direction, :reset)
-    |> assign(:infinite_pages, [])
-    |> assign(:infinite_item_ids, MapSet.new())
-    |> assign(:infinite_selectable_ids, MapSet.new())
-    |> assign(:infinite_loaded_count, 0)
-    |> assign(:infinite_range_start, 0)
-    |> assign(:infinite_range_end, 0)
-    |> assign(:infinite_has_previous, false)
-    |> assign(:infinite_has_next, false)
-  end
-
-  # The rows of a result set that starts over leave with it, so the loading state takes their
-  # place rather than showing below them. A silent refresh shows no loading state, so its rows
-  # stay until the new ones arrive.
-  defp clear_stale_items(socket) do
-    if Map.get(socket.assigns, :silent, false),
-      do: socket,
-      else: maybe_stream_items(socket, [], reset: true)
-  end
-
-  defp reset_infinite_pagination(socket) do
-    socket
-    |> assign(:current_page, 1)
-    |> assign(:after_keyset, nil)
-    |> assign(:before_keyset, nil)
-    |> assign(:first_keyset, nil)
-    |> assign(:last_keyset, nil)
-    |> assign(:infinite_append?, false)
-    |> mark_infinite_reset()
-  end
-
-  defp maybe_reset_infinite_pagination(socket) do
-    if infinite_mode?(socket), do: reset_infinite_pagination(socket), else: socket
-  end
-
-  @silent_infinite_state_keys ~w(
-    current_page after_keyset before_keyset first_keyset last_keyset
-    infinite_append? infinite_direction infinite_pages infinite_item_ids
-    infinite_selectable_ids infinite_loaded_count infinite_range_start
-    infinite_range_end infinite_has_previous infinite_has_next
-  )a
-
-  defp prepare_refresh(%{assigns: %{silent: true}} = socket) do
-    if infinite_mode?(socket) do
-      state = Map.take(socket.assigns, @silent_infinite_state_keys)
-
-      socket
-      |> assign(:silent_refresh_state, state)
-      |> assign(:current_page, 1)
-      |> assign(:after_keyset, nil)
-      |> assign(:before_keyset, nil)
-      |> assign(:first_keyset, nil)
-      |> assign(:last_keyset, nil)
-      |> assign(:infinite_append?, false)
-      |> assign(:infinite_direction, :reset)
-    else
-      socket
-    end
-  end
-
-  defp prepare_refresh(socket), do: maybe_reset_infinite_pagination(socket)
-
-  defp infinite_mode?(socket),
-    do: Map.get(socket.assigns, :pagination_mode, :offset) == :infinite
-
   defp maybe_put_cursor(state, _key, nil), do: state
   defp maybe_put_cursor(state, key, cursor), do: Map.put(state, key, cursor)
 
@@ -1729,12 +928,12 @@ defmodule Cinder.LiveComponent do
 
   defp notify_state_change(socket, filters \\ nil) do
     filters = filters || socket.assigns.filters
-    pagination_mode = socket.assigns.pagination_mode
-    current_page = if pagination_mode == :infinite, do: 1, else: socket.assigns.current_page
+    current_page = socket.assigns.current_page
     sort_by = socket.assigns.sort_by
     page_size_config = socket.assigns.page_size_config
     search_term = socket.assigns.search_term
     filter_field_names = socket.assigns.filter_field_names
+    pagination_mode = socket.assigns.pagination_mode
 
     state = %{
       filters: filters,
@@ -1746,9 +945,9 @@ defmodule Cinder.LiveComponent do
       filter_field_names: filter_field_names
     }
 
-    # Infinite pagination resumes from the same keyset cursor as keyset pagination.
+    # For keyset pagination, include after/before cursors for URL persistence
     state =
-      if pagination_mode in [:keyset, :infinite] do
+      if pagination_mode == :keyset do
         state
         |> maybe_put_cursor(:after, socket.assigns.after_keyset)
         |> maybe_put_cursor(:before, socket.assigns.before_keyset)
@@ -1783,18 +982,17 @@ defmodule Cinder.LiveComponent do
         before: Cinder.UrlManager.decode_cursor(Map.get(raw_params, "before"))
       }
 
-      # Keyset and infinite URLs carry a cursor, not the ordinal of a page or batch.
-      # Our own URL patch must not turn the page on screen, or an in-flight/appended
-      # batch, back into page one and issue the same read again.
-      same_cursor? =
-        decoded_state.after == socket.assigns.after_keyset and
-          decoded_state.before == socket.assigns.before_keyset
-
       current_page =
         cond do
-          socket.assigns.pagination_mode == :offset -> decoded_state.current_page
-          same_cursor? -> socket.assigns.current_page
-          true -> 1
+          socket.assigns.pagination_mode == :offset ->
+            decoded_state.current_page
+
+          decoded_state.after == socket.assigns.after_keyset and
+              decoded_state.before == socket.assigns.before_keyset ->
+            socket.assigns.current_page
+
+          true ->
+            1
         end
 
       final_sort_by =
@@ -1826,21 +1024,12 @@ defmodule Cinder.LiveComponent do
           socket
         end
 
-      # Keyset and infinite pagination share cursor recovery.
+      # Handle keyset cursors from URL (after/before params)
       updated_socket =
-        if socket.assigns.pagination_mode in [:keyset, :infinite] do
+        if socket.assigns.pagination_mode == :keyset do
           updated_socket
-          |> assign(:after_keyset, decoded_state.after)
-          |> assign(:before_keyset, decoded_state.before)
-        else
-          updated_socket
-        end
-
-      updated_socket =
-        if socket.assigns.pagination_mode == :infinite and not same_cursor? do
-          updated_socket
-          |> mark_infinite_reset()
-          |> assign(:infinite_append?, false)
+          |> maybe_assign_cursor(:after_keyset, decoded_state.after)
+          |> maybe_assign_cursor(:before_keyset, decoded_state.before)
         else
           updated_socket
         end
@@ -1854,6 +1043,9 @@ defmodule Cinder.LiveComponent do
       socket
     end
   end
+
+  defp maybe_assign_cursor(socket, _key, nil), do: socket
+  defp maybe_assign_cursor(socket, key, cursor), do: assign(socket, key, cursor)
 
   # ============================================================================
   # PRIVATE FUNCTIONS - Initialization
@@ -1874,13 +1066,12 @@ defmodule Cinder.LiveComponent do
 
     # Determine pagination mode (default to :offset for backwards compatibility)
     pagination_mode = assigns[:pagination_mode] || :offset
-    overscan = normalize_overscan(assigns[:overscan])
 
     socket
     |> assign(:page_size, selected_page_size)
     |> assign(:page_size_config, updated_page_size_config)
     |> assign(:current_page, assigns[:current_page] || 1)
-    |> assign(:loading, Map.get(assigns, :loading, false))
+    |> assign(:loading, false)
     |> assign(:error, assigns[:error] || false)
     |> assign(:data, assigns[:data] || [])
     |> assign(:sort_by, assigns[:sort_by] || extract_initial_sorts(assigns))
@@ -1888,67 +1079,29 @@ defmodule Cinder.LiveComponent do
     |> assign(:search_term, assigns[:search_term] || "")
     |> assign(:theme, assigns[:theme] || Cinder.Theme.default())
     |> assign(:query_opts, assigns[:query_opts] || [])
+    |> assign(:inferred_loads, assigns[:inferred_loads] || [])
     |> assign(:initial_load, Map.get(assigns, :initial_load, :async))
     |> assign_new(:action, fn -> nil end)
     |> assign_new(:page, fn -> nil end)
-    |> assign_new(:__initial_load__, fn -> is_nil(assigns[:page]) end)
     |> assign(:user_has_interacted, Map.get(socket.assigns, :user_has_interacted, false))
     # Keyset pagination state
     |> assign(:pagination_mode, pagination_mode)
     |> assign(:count_mode, Map.get(assigns, :count_mode, true))
     |> assign_new(:total_count, fn -> nil end)
     |> assign_new(:count_failed?, fn -> false end)
-    |> assign(:overscan, overscan)
-    |> assign(:show_item_numbers, assigns[:show_item_numbers] || false)
     |> assign(:after_keyset, assigns[:after_keyset])
     |> assign(:before_keyset, assigns[:before_keyset])
     |> assign(:first_keyset, assigns[:first_keyset])
     |> assign(:last_keyset, assigns[:last_keyset])
-    |> assign(:infinite_append?, assigns[:infinite_append?] || false)
-    |> assign(:infinite_direction, assigns[:infinite_direction] || :reset)
-    |> assign(:infinite_pages, assigns[:infinite_pages] || [])
-    |> assign(:infinite_item_ids, assigns[:infinite_item_ids] || MapSet.new())
-    |> assign(:infinite_selectable_ids, assigns[:infinite_selectable_ids] || MapSet.new())
-    |> assign(:infinite_loaded_count, assigns[:infinite_loaded_count] || 0)
-    |> assign(:infinite_range_start, assigns[:infinite_range_start] || 0)
-    |> assign(:infinite_range_end, assigns[:infinite_range_end] || 0)
-    |> assign(:infinite_has_previous, assigns[:infinite_has_previous] || false)
-    |> assign(:infinite_has_next, assigns[:infinite_has_next] || false)
-    |> assign(:infinite_prefetch_scheduled?, assigns[:infinite_prefetch_scheduled?] || false)
-    |> assign(:infinite_load, Map.get(assigns, :infinite_load, :automatic))
-    |> assign(:load_more_label, assigns[:load_more_label])
-    |> assign_new(:infinite_stream_configured?, fn -> false end)
     # Selection state
     |> assign(:selectable, assigns[:selectable] || false)
-    |> assign(:select_all, Map.get(assigns, :select_all, :query))
-    |> assign_new(:selected_ids, fn -> MapSet.new(assigns[:selected] || []) end)
-    |> assign_new(:selection_mode, fn -> :explicit end)
-    |> assign_new(:selection_scope_ids, fn -> nil end)
-    |> assign_new(:selection_attempt, fn -> nil end)
-    |> assign_new(:selection_loading, fn -> false end)
+    |> assign_new(:selected_ids, fn -> MapSet.new() end)
     |> assign(:on_selection_change, assigns[:on_selection_change])
     |> assign(:on_query_change, assigns[:on_query_change])
     |> assign(:id_field, assigns[:id_field] || :id)
     |> assign(:sort_mode, assigns[:sort_mode] || :additive)
     # Bulk actions
     |> assign_new(:bulk_action_slots, fn -> [] end)
-    |> assign_new(:bulk_action_confirmation_slot, fn -> [] end)
-    |> assign_new(:bulk_action_confirmation, fn -> nil end)
-  end
-
-  defp normalize_overscan(value) when is_integer(value) and value >= 0, do: value
-  defp normalize_overscan(_value), do: 1
-
-  defp ensure_infinite_stream(socket) do
-    if socket.assigns.infinite_stream_configured? do
-      socket
-    else
-      component_id = socket.assigns.id
-
-      socket
-      |> stream_configure(:items, dom_id: &"#{component_id}-item-#{&1.id}")
-      |> assign(:infinite_stream_configured?, true)
-    end
   end
 
   defp assign_column_definitions(socket) do
@@ -2007,23 +1160,14 @@ defmodule Cinder.LiveComponent do
   # Keys that affect data queries - changes to these trigger a reload.
   # Note: actor, tenant, and scope are normalized separately to avoid
   # false positives from Ecto struct metadata differences.
-  @data_keys ~w(filters sort_by current_page page_size search_term query query_opts pagination_mode after_keyset before_keyset renderer)a
+  @data_keys ~w(filters sort_by current_page page_size search_term query query_opts after_keyset before_keyset)a
 
   defp data_state(assigns) do
     base_state = Map.take(assigns, @data_keys)
 
     Map.merge(base_state, %{
       count_mode: Map.get(assigns, :count_mode, true),
-      actor_id: normalize_auth(assigns[:actor]),
-      tenant_id: normalize_auth(assigns[:tenant]),
-      scope_id: normalize_scope(assigns[:scope])
-    })
-  end
-
-  @selection_scope_keys ~w(filters search_term query query_opts action selectable select_all id_field search_fn)a
-
-  defp selection_scope_state(assigns) do
-    Map.merge(Map.take(assigns, @selection_scope_keys), %{
+      inferred_loads: Map.get(assigns, :inferred_loads, []),
       actor_id: normalize_auth(assigns[:actor]),
       tenant_id: normalize_auth(assigns[:tenant]),
       scope_id: normalize_scope(assigns[:scope])
@@ -2063,30 +1207,10 @@ defmodule Cinder.LiveComponent do
     reload_requested = socket.assigns[:__reload_requested__] == true
     socket = assign(socket, :__reload_requested__, false)
 
-    cond do
-      first_load or reload_requested -> load_data(socket)
-      state_changed -> socket |> start_over(prev, curr) |> load_data()
-      true -> socket
-    end
-  end
-
-  @result_keys ~w(filters sort_by search_term query query_opts actor_id tenant_id scope_id renderer)a
-  @cursor_keys ~w(current_page after_keyset before_keyset)a
-
-  # A new query, filter, search, sort or reader is a different result set, so an infinite
-  # stream starts over instead of keeping the old rows; so does a new layout, whose container
-  # has none of the rows streamed. A cursor arriving in the same update, such as one restored
-  # from the URL, is kept.
-  defp start_over(socket, prev, curr) do
-    cond do
-      not infinite_mode?(socket) or Map.take(prev, @result_keys) == Map.take(curr, @result_keys) ->
-        socket
-
-      Map.take(prev, @cursor_keys) != Map.take(curr, @cursor_keys) ->
-        mark_infinite_reset(socket)
-
-      true ->
-        reset_infinite_pagination(socket)
+    if first_load or state_changed or reload_requested do
+      load_data(socket)
+    else
+      socket
     end
   end
 
@@ -2110,12 +1234,12 @@ defmodule Cinder.LiveComponent do
       columns: columns,
       search_term: search_term,
       pagination_mode: pagination_mode,
+      count_mode: count_mode,
       after_keyset: after_keyset,
       before_keyset: before_keyset
     } = socket.assigns
 
     scope = Map.get(socket.assigns, :scope)
-    count_mode = Map.get(socket.assigns, :count_mode, :sync)
 
     resource_var = resource
 
@@ -2125,18 +1249,20 @@ defmodule Cinder.LiveComponent do
     action = Map.get(socket.assigns, :action)
 
     options = [
+      id: socket.assigns.id,
       actor: actor,
       tenant: tenant,
       scope: scope,
       action: action,
-      query_opts: query_opts,
+      query_opts: with_loads(query_opts, socket.assigns.inferred_loads),
       filters: filters,
       sort_by: sort_by,
-      page_size: read_size(socket),
+      tiebreakers: tiebreakers(columns),
+      page_size: page_size,
       current_page: current_page,
-      columns: query_columns,
+      columns: without_slots(query_columns),
       search_term: search_term,
-      search_fn: Map.get(socket.assigns, :search_fn),
+      search_fn: socket.assigns.search_fn,
       pagination_configured: socket.assigns.page_size_config.configurable || page_size != 25,
       # Keyset pagination options
       pagination_mode: pagination_mode,
@@ -2146,7 +1272,6 @@ defmodule Cinder.LiveComponent do
     ]
 
     socket
-    |> assign(:__initial_load__, false)
     |> assign(:loading, true)
     |> assign(:silent, silent)
     |> assign(:error, false)
@@ -2186,68 +1311,6 @@ defmodule Cinder.LiveComponent do
     end)
   end
 
-  defp selection_query_options(socket) do
-    assigns = socket.assigns
-
-    [
-      actor: assigns.actor,
-      tenant: assigns.tenant,
-      scope: Map.get(assigns, :scope),
-      action: Map.get(assigns, :action),
-      query_opts: assigns.query_opts,
-      filters: assigns.filters,
-      sort_by: assigns.sort_by,
-      page_size: assigns.page_size,
-      current_page: assigns.current_page,
-      columns: Map.get(assigns, :query_columns, assigns.columns),
-      search_term: assigns.search_term,
-      search_fn: assigns.search_fn,
-      pagination_configured: assigns.page_size_config.configurable || assigns.page_size != 25,
-      pagination_mode: assigns.pagination_mode,
-      after_keyset: assigns.after_keyset,
-      before_keyset: assigns.before_keyset
-    ]
-  end
-
-  defp apply_select_all_result(socket, attempt, result) do
-    if socket.assigns.selection_attempt == attempt do
-      case result do
-        {:ok, scope_ids} ->
-          socket
-          |> assign(
-            selection_mode: :explicit,
-            selected_ids: MapSet.union(socket.assigns.selected_ids, scope_ids),
-            selection_scope_ids: scope_ids,
-            selection_attempt: nil,
-            selection_loading: false
-          )
-          |> notify_selection_change(:select_all)
-
-        {:error, reason} ->
-          Logger.error("Cinder: failed to select all filtered records: #{inspect(reason)}")
-          assign(socket, selection_attempt: nil, selection_loading: false)
-      end
-    else
-      socket
-    end
-  end
-
-  defp invalidate_selection_scope(socket) do
-    if socket.assigns.selection_mode == :all_matching do
-      socket |> clear_selection_state() |> notify_selection_change(:clear)
-    else
-      assign(socket, selection_scope_ids: nil, selection_attempt: nil, selection_loading: false)
-    end
-  end
-
-  defp maybe_invalidate_selection_scope(socket, previous) do
-    if selection_scope_state(socket.assigns) == previous do
-      socket
-    else
-      invalidate_selection_scope(socket)
-    end
-  end
-
   # With `count: true` the page read counts too; with `false` there is never a total.
   # An async count keeps the last total on screen until the new one arrives.
   defp store_page_count(%{assigns: %{count_mode: true}} = socket, page),
@@ -2283,12 +1346,17 @@ defmodule Cinder.LiveComponent do
     assign(socket, total_count: nil, count_failed?: true)
   end
 
+  # The query is already built: the rest is for the count's telemetry
   defp count_query_options(socket) do
     [
+      id: socket.assigns.id,
       actor: socket.assigns.actor,
       tenant: socket.assigns.tenant,
       scope: Map.get(socket.assigns, :scope),
-      query_opts: socket.assigns.query_opts
+      query_opts: socket.assigns.query_opts,
+      filters: socket.assigns.filters,
+      search_term: socket.assigns.search_term,
+      columns: Map.get(socket.assigns, :query_columns, socket.assigns.columns)
     ]
   end
 end

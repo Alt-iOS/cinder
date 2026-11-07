@@ -76,212 +76,6 @@ defmodule Cinder.Renderers.PaginationTest do
     end
   end
 
-  describe "while a page loads" do
-    test "keyset navigation is disabled" do
-      page = %Ash.Page.Keyset{
-        results: [%{id: 1}],
-        count: nil,
-        limit: 10,
-        more?: true,
-        after: "page-1-last-cursor",
-        before: nil,
-        rerun: nil
-      }
-
-      assigns =
-        Map.merge(base_assigns("keyset-loading"), %{
-          pagination_mode: :keyset,
-          total_count: nil,
-          page: page
-        })
-
-      idle = render_component(&Pagination.render/1, assigns)
-      refute idle =~ ~r/phx-click="(prev|next)_page"[^>]*disabled/
-
-      loading = render_component(&Pagination.render/1, Map.put(assigns, :loading, true))
-      assert loading =~ ~r/phx-click="prev_page"[^>]*disabled/
-      assert loading =~ ~r/phx-click="next_page"[^>]*disabled/
-    end
-
-    test "offset navigation is disabled" do
-      idle = render_component(&Pagination.render/1, base_assigns("offset-loading"))
-      refute idle =~ ~r/phx-click="goto_page"[^>]*disabled/
-
-      loading =
-        render_component(
-          &Pagination.render/1,
-          Map.put(base_assigns("offset-loading"), :loading, true)
-        )
-
-      assert loading =~ ~r/phx-click="goto_page"[^>]*disabled/
-    end
-  end
-
-  describe "keyset footer" do
-    test "shows the total beside cursor navigation, without a page number" do
-      assigns =
-        base_assigns("keyset")
-        |> Map.merge(%{pagination_mode: :keyset, current_page: 3})
-
-      html = render_component(&Pagination.render/1, assigns)
-
-      assert html =~ "100 items"
-      assert html =~ "Next"
-      refute html =~ "Page 3"
-      refute html =~ "showing"
-    end
-
-    test "renders cursor navigation without a total count" do
-      assigns =
-        base_assigns("keyset-no-count")
-        |> Map.merge(%{
-          pagination_mode: :keyset,
-          current_page: 1,
-          total_count: nil,
-          page: %{base_assigns("unused").page | count: nil, more?: true}
-        })
-
-      html = render_component(&Pagination.render/1, assigns)
-
-      refute html =~ "Page 1"
-      assert html =~ "Next"
-      refute html =~ "showing"
-      refute html =~ " of "
-    end
-
-    test "keeps the footer after navigating backward to the first page" do
-      page = %Ash.Page.Keyset{
-        results: [%{id: 1}, %{id: 2}],
-        count: nil,
-        limit: 10,
-        more?: false,
-        after: nil,
-        before: "page-2-first-cursor",
-        rerun: nil
-      }
-
-      assigns =
-        base_assigns("keyset-back-to-first")
-        |> Map.merge(%{
-          pagination_mode: :keyset,
-          current_page: 1,
-          total_count: nil,
-          page: page
-        })
-
-      html = render_component(&Pagination.render/1, assigns)
-
-      refute html =~ "Page 1"
-      assert html =~ "Next"
-      refute html =~ ~s(title="Previous page" disabled)
-    end
-  end
-
-  describe "infinite pagination" do
-    test "renders an ahead-of-viewport sentinel while more results remain" do
-      assigns =
-        base_assigns("items")
-        |> Map.merge(%{
-          pagination_mode: :infinite,
-          current_page: 1,
-          loaded_count: 10,
-          loading: false,
-          error: false
-        })
-
-      html = render_component(&Pagination.render/1, assigns)
-
-      assert html =~ ~s(data-pagination-mode="infinite")
-      assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
-      assert html =~ ~s(data-infinite-prefetch-distance="viewport")
-      assert html =~ ~s(data-infinite-overscan="1")
-      assert html =~ "h-px overflow-hidden p-0"
-      assert html =~ "sr-only"
-      assert html =~ "100 items"
-      refute html =~ ~s(phx-viewport-bottom="load_more")
-      refute html =~ ~s(id="items-page-size-options")
-      refute html =~ "showing 1-10 of 100"
-      assert html =~ ~s(class="pagination-info")
-      assert html =~ ~s(data-key="pagination_info_class")
-    end
-
-    test "passes configured overscan to the automatic sentinel and keeps manual controls visible" do
-      automatic =
-        base_assigns("automatic-items")
-        |> Map.merge(%{
-          pagination_mode: :infinite,
-          loaded_count: 10,
-          loading: false,
-          error: false,
-          overscan: 3
-        })
-
-      assert render_component(&Pagination.render/1, automatic) =~
-               ~s(data-infinite-overscan="3")
-
-      manual = Map.put(automatic, :infinite_load, :manual)
-      manual_html = render_component(&Pagination.render/1, manual)
-
-      refute manual_html =~ ~s(phx-hook="CinderInfiniteSentinel")
-      refute manual_html =~ "h-px overflow-hidden p-0"
-      refute manual_html =~ "sr-only"
-      assert manual_html =~ "Load more"
-    end
-
-    test "renders infinite navigation when count is disabled" do
-      assigns =
-        base_assigns("items-no-count")
-        |> Map.merge(%{
-          pagination_mode: :infinite,
-          total_count: nil,
-          page: %{base_assigns("unused").page | count: nil, more?: true},
-          loaded_count: 10,
-          loading: false,
-          error: false
-        })
-
-      html = render_component(&Pagination.render/1, assigns)
-
-      assert html =~ ~s(phx-hook="CinderInfiniteSentinel")
-      refute html =~ "showing"
-      refute html =~ ~s(data-pagination-state="counted")
-    end
-
-    test "renders loading, retry, and end states without another sentinel" do
-      loading =
-        base_assigns("items")
-        |> Map.merge(%{pagination_mode: :infinite, loaded_count: 10, loading: true, error: false})
-
-      assert render_component(&Pagination.render/1, loading) =~
-               ~s(data-pagination-state="loading")
-
-      failed = %{loading | loading: false, error: true}
-      assert render_component(&Pagination.render/1, failed) =~ ~s(phx-click="retry_load_more")
-
-      ended =
-        failed
-        |> Map.merge(%{error: false, page: %{failed.page | more?: false}})
-
-      end_html = render_component(&Pagination.render/1, ended)
-      assert end_html =~ ~s(data-pagination-state="end")
-      assert end_html =~ "You have reached the end of this list"
-      assert end_html =~ ~s(class="pagination-info")
-      assert end_html =~ ~s(data-key="pagination_info_class")
-      refute end_html =~ ~s(id="items-page-size-options")
-      refute end_html =~ "showing"
-      refute end_html =~ ~s(phx-hook="CinderInfiniteSentinel")
-    end
-  end
-
-  describe "item numbering" do
-    test "numbers keyset pages and accumulated infinite results" do
-      page = %{limit: 10}
-
-      assert Cinder.Renderers.Helpers.item_number(0, :keyset, 3, page) == 21
-      assert Cinder.Renderers.Helpers.item_number(24, :infinite, 3, page) == 25
-    end
-  end
-
   describe "without a total count" do
     test "offset pagination renders previous/next navigation without totals" do
       assigns =
@@ -385,6 +179,23 @@ defmodule Cinder.Renderers.PaginationTest do
         })
 
       assert render_component(&Pagination.render/1, assigns) =~ "Next"
+    end
+  end
+
+  test "pager buttons are disabled during a reload" do
+    for mode <- [:offset, :keyset] do
+      html =
+        render_component(
+          &Pagination.render/1,
+          base_assigns("reload") |> Map.merge(%{loading: true, pagination_mode: mode})
+        )
+
+      buttons =
+        Regex.scan(~r/<button[^>]*phx-click="(?:goto_page|prev_page|next_page)"[^>]*>/, html)
+        |> List.flatten()
+
+      assert buttons != []
+      assert Enum.all?(buttons, &String.contains?(&1, " disabled"))
     end
   end
 end

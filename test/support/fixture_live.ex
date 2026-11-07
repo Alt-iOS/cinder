@@ -13,7 +13,7 @@ defmodule Cinder.TestLive.Fixture do
       path =
         Cinder.TestLive.Fixture.register(fn assigns ->
           ~H\"\"\"
-          <Cinder.collection resource={Cinder.Integration.Album} url_state={@url_state}>
+          <Cinder.collection resource={Music.Album} url_state={@url_state}>
             <:col :let={album} field="title" filter sort>{album.title}</:col>
           </Cinder.collection>
           \"\"\"
@@ -25,6 +25,13 @@ defmodule Cinder.TestLive.Fixture do
   and returns the rendered template. Its parameter **must** be named `assigns` so
   the `~H` sigil and `@field` references resolve. (`import Phoenix.Component` is
   brought in by `Cinder.ConnCase`.)
+
+  A collection's callbacks to its parent (`on_error`, `on_selection_change`...) are
+  messages to this LiveView. To assert on them, register with `forward_to: self()`:
+  any message the fixture doesn't handle itself is sent on to the test process.
+
+      path = Cinder.TestLive.Fixture.register(render_fun, forward_to: self())
+      assert_receive {:bulk_failed, %{partial: true}}
 
   To call a parent-side function such as `Cinder.refresh_table/3` from a test,
   give the collection an explicit ID and use `run/2`:
@@ -51,9 +58,9 @@ defmodule Cinder.TestLive.Fixture do
   The function is held in an in-process ETS table (not serialized), so it can be
   any closure capturing test state.
   """
-  def register(render_fun) when is_function(render_fun, 1) do
+  def register(render_fun, opts \\ []) when is_function(render_fun, 1) do
     id = System.unique_integer([:positive]) |> Integer.to_string()
-    :ets.insert(@table, {id, render_fun})
+    :ets.insert(@table, {id, render_fun, Keyword.get(opts, :forward_to)})
     "/c/#{id}"
   end
 
@@ -75,16 +82,24 @@ defmodule Cinder.TestLive.Fixture do
     end
   end
 
-  @impl true
-  def mount(%{"id" => id}, _session, socket) do
+  @doc """
+  Assigns the render function registered under `id`, for this fixture and the other
+  fixture LiveViews in `Cinder.TestLive.UrlSyncFixtures`.
+  """
+  def assign_registered(socket, id) do
     case :ets.lookup(@table, id) do
-      [{^id, render_fun}] ->
-        {:ok, assign(socket, :__render_fun__, render_fun)}
+      [{^id, render_fun, forward_to}] ->
+        assign(socket, __render_fun__: render_fun, __forward_to__: forward_to)
 
       [] ->
         raise "No fixture registered for id #{inspect(id)}. " <>
                 "Call Cinder.TestLive.Fixture.register/1 and visit the returned path."
     end
+  end
+
+  @impl true
+  def mount(%{"id" => id}, _session, socket) do
+    {:ok, assign_registered(socket, id)}
   end
 
   @impl true
@@ -96,6 +111,13 @@ defmodule Cinder.TestLive.Fixture do
   def handle_info({:run, {pid, ref}, fun}, socket) do
     socket = fun.(socket)
     send(pid, {ref, :ok})
+    {:noreply, socket}
+  end
+
+  # A collection's callbacks, for a test registered with `forward_to:`. Without it, an
+  # unexpected message still fails the test, as a parent without the clause would.
+  def handle_info(message, %{assigns: %{__forward_to__: pid}} = socket) when is_pid(pid) do
+    send(pid, message)
     {:noreply, socket}
   end
 

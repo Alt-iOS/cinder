@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.Renderers.SelectAll do
   @moduledoc false
 
@@ -10,37 +14,24 @@ defmodule Cinder.Renderers.SelectAll do
   attr :id_field, :atom, required: true
   attr :loading, :boolean, required: true
   attr :label, :string, default: nil
-  attr :mode, :atom, default: :query
   attr :myself, :any, required: true
-  attr :page_ids, :any, default: nil
-  attr :pending, :boolean, default: false
-  attr :scope_ids, :any, default: nil
-  attr :selection_mode, :atom, default: :explicit
   attr :selectable, :any, required: true
   attr :selected_ids, :any, required: true
   attr :theme, :map, required: true
   attr :show_label, :boolean, default: true
 
   def render(assigns) do
-    page_ids =
-      assigns.page_ids || Selection.page_ids(assigns.data, assigns.id_field, assigns.selectable)
-
-    selection_ids = if assigns.mode == :query, do: assigns.scope_ids || page_ids, else: page_ids
-
-    state = selection_state(assigns, selection_ids)
+    selection_ids =
+      assigns.data
+      |> Enum.filter(&Selection.item_selectable?(assigns.selectable, &1))
+      |> Enum.map(&to_string(Map.get(&1, assigns.id_field)))
+      |> MapSet.new()
 
     assigns =
       assigns
-      |> assign(
-        :disabled,
-        assigns.loading or (assigns.mode == :page and MapSet.size(selection_ids) == 0)
-      )
-      |> assign(
-        :event,
-        if(assigns.mode == :page, do: "toggle_select_all_page", else: "toggle_select_all")
-      )
-      |> assign(:label, assigns.label || default_label(assigns.mode))
-      |> assign(:state, state)
+      |> assign(:disabled, assigns.loading or MapSet.size(selection_ids) == 0)
+      |> assign(:label, assigns.label || dgettext("cinder", "Select all visible items"))
+      |> assign(:state, explicit_selection_state(assigns.selected_ids, selection_ids))
 
     ~H"""
     <label class={@theme.select_all_container_class} data-key="select_all_container_class">
@@ -55,7 +46,7 @@ defmodule Cinder.Renderers.SelectAll do
           data-key="selection_checkbox_class"
           data-selection-state={@state}
           disabled={@disabled}
-          phx-click={@event}
+          phx-click="toggle_select_all_page"
           phx-disable-with=""
           phx-target={@myself}
         />
@@ -71,18 +62,6 @@ defmodule Cinder.Renderers.SelectAll do
     </label>
     """
   end
-
-  defp default_label(:page), do: dgettext("cinder", "Select all visible items")
-  defp default_label(_mode), do: dgettext("cinder", "Select all filtered items")
-
-  defp selection_state(%{mode: :query, selection_mode: :all_matching} = assigns, _ids) do
-    if MapSet.size(assigns.selected_ids) == 0, do: :all, else: :some
-  end
-
-  defp selection_state(%{pending: true}, _selection_ids), do: :all
-
-  defp selection_state(assigns, selection_ids),
-    do: explicit_selection_state(assigns.selected_ids, selection_ids)
 
   defp explicit_selection_state(selected_ids, selection_ids) do
     cond do

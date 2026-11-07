@@ -55,53 +55,7 @@ defmodule Cinder.Renderers.ListSelectionTest do
     }
   end
 
-  test "selected infinite items remain deselectable after becoming ineligible" do
-    record = %{id: "selected", name: "Selected"}
-
-    assigns =
-      Map.merge(base_assigns(), %{
-        pagination_mode: :infinite,
-        selectable: fn _ -> false end,
-        selected_ids: MapSet.new([record.id]),
-        item_click: fn _ -> Phoenix.LiveView.JS.push("open") end,
-        streams: %{
-          items: [
-            {"test-selected", %{record: record, id: record.id, number: 1, selectable?: false}}
-          ]
-        }
-      })
-
-    html = render_component(&ListRenderer.render/1, assigns)
-    assert html =~ ~r/<input[^>]*checked[^>]*phx-value-id="selected"/
-    refute html =~ ~r/<input[^>]*disabled[^>]*phx-value-id="selected"/
-    refute html =~ ~r/<input[^>]*phx-value-id="selected"[^>]*data-cinder-selection-disabled/
-  end
-
   describe "list selection rendering" do
-    test "renders a filtered-query select-all control" do
-      html = render_component(&ListRenderer.render/1, Map.put(base_assigns(), :selectable, true))
-
-      assert html =~ ~s(phx-click="toggle_select_all")
-      assert html =~ ~s(phx-disable-with="")
-      assert html =~ "Select all filtered items"
-      assert html =~ ~r/<div[^>]*class="mb-3"[^>]*>\s*<label/
-    end
-
-    test "can hide select all while retaining item checkboxes" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          selectable: true,
-          select_all: false,
-          data: [%{id: "item-1", name: "Item 1"}]
-        })
-
-      html = render_component(&ListRenderer.render/1, assigns)
-
-      refute html =~ "toggle_select_all"
-      assert html =~ ~s(phx-click="toggle_select")
-    end
-
     test "renders leading checkbox with theme classes when selectable=true" do
       assigns =
         base_assigns()
@@ -118,20 +72,6 @@ defmodule Cinder.Renderers.ListSelectionTest do
       assert html =~ "test-checkbox-class"
       assert html =~ ~s(phx-click="toggle_select")
       assert html =~ ~s(phx-value-id="item-1")
-    end
-
-    test "disables item selection while query-wide select all is loading" do
-      assigns =
-        base_assigns()
-        |> Map.merge(%{
-          selectable: true,
-          selection_loading: true,
-          data: [%{id: "item-1", name: "Item 1"}]
-        })
-
-      html = render_component(&ListRenderer.render/1, assigns)
-
-      assert html =~ ~r/<input[^>]*disabled[^>]*phx-click="toggle_select"/
     end
 
     test "does not render selection elements when selectable=false" do
@@ -235,14 +175,6 @@ defmodule Cinder.Renderers.ListSelectionTest do
 
       assert html =~ ~r/<input[^>]*checked[^>]*phx-value-id="item-2"/
       refute html =~ ~r/<input[^>]*disabled[^>]*phx-value-id="item-2"/
-    end
-
-    test "applies selected styling only to selectable selected items" do
-      assigns = Map.put(predicate_assigns(), :selected_ids, MapSet.new(["item-1"]))
-
-      html = render_component(&ListRenderer.render/1, assigns)
-
-      assert html =~ "test-selected-item"
     end
   end
 end

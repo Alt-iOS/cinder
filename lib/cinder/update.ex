@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.Update do
   @moduledoc """
   Efficient in-memory updates for Cinder collection data.
@@ -39,15 +43,10 @@ defmodule Cinder.Update do
 
   - These functions modify in-memory data only. Computed fields, aggregates,
     and calculations that come from the database will NOT be recalculated.
-  - Infinite collections use LiveView streams and deliberately do not retain
-    records in the socket. Pass full records to `update_if_visible/4` or
-    `update_items_if_visible/4` so Cinder can stream visible replacements.
-    ID-only updates are a no-op in infinite mode.
   - Removing an item does not backfill its page: rows from the next page move up on
     the next refresh. A removal that empties the page reads it again.
-  - For creates, deletes, or changes that affect filtering, sorting, keysets,
-    derived data, ordering, or row numbering, use `Cinder.refresh_table/2` instead. An
-    infinite refresh resets and requeries its bounded window.
+  - For changes that affect derived data, ordering or filtering, use `refresh_table/2`
+    instead.
   - If the item is not found in the current data, the update is silently ignored.
   - The `update_if_visible` functions check visibility within the component itself.
   """
@@ -192,12 +191,6 @@ defmodule Cinder.Update do
   the existing table data - useful for lazy loading scenarios where you want
   to transform incoming PubSub data.
 
-  Infinite collections require the raw-item form because LiveView streams do
-  not retain rendered records on the server. Cinder checks the stream's small
-  metadata window before invoking the callback, preserves the row's cursor and
-  number, and sends the replacement record through the stream. The callback
-  must preserve the configured ID field.
-
   Safe to call when you're unsure if the item is currently displayed.
 
   ## Parameters
@@ -245,10 +238,6 @@ defmodule Cinder.Update do
   in the provided list AND currently visible will be updated. The component
   itself determines which items are visible by checking its current data.
 
-  In infinite mode, pass raw items. Cinder passes only records whose IDs are in
-  the retained stream window, in rendered order, and streams the returned
-  replacements without retaining them in socket assigns.
-
   The update function is called ONCE with ALL visible items, enabling efficient
   batch operations. If no items are visible, the function is never called.
 
@@ -277,14 +266,8 @@ defmodule Cinder.Update do
 
       # Lazy batch loading - only loads visible items
       def handle_info(%{payload: %{data: data}}, socket) do
-        items = List.wrap(data)
-        ids = Enum.map(items, & &1.id)
-        raw_by_id = Map.new(items, &{&1.id, &1})
-
-        {:noreply, update_items_if_visible(socket, "table", ids, fn visible_items ->
-          to_load = Enum.map(visible_items, &raw_by_id[&1.id])
-          {:ok, loaded} = Ash.load(to_load, [:relations], opts)
-          loaded
+        {:noreply, update_items_if_visible(socket, "table", List.wrap(data), fn visible_items ->
+          Ash.load!(visible_items, [:relations])
         end)}
       end
   """

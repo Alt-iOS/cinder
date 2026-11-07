@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.Renderers.Helpers do
   @moduledoc false
 
@@ -49,36 +53,6 @@ defmodule Cinder.Renderers.Helpers do
         target: myself
       )
     end
-  end
-
-  @doc false
-  def item_number(index, :infinite, _current_page, _page), do: index + 1
-
-  def item_number(index, _mode, _current_page, %Ash.Page.Offset{offset: offset}) do
-    offset + index + 1
-  end
-
-  def item_number(index, :keyset, current_page, %{limit: limit}) do
-    (current_page - 1) * limit + index + 1
-  end
-
-  def item_number(index, _mode, _current_page, _page), do: index + 1
-
-  @doc false
-  def assign_infinite_defaults(assigns) do
-    stream_items = assigns |> Map.get(:streams, %{}) |> Map.get(:items, [])
-
-    assigns
-    |> Phoenix.Component.assign(:stream_items, stream_items)
-    |> Phoenix.Component.assign_new(:infinite_loaded_count, fn -> 0 end)
-    |> Phoenix.Component.assign_new(:infinite_range_start, fn -> 0 end)
-    |> Phoenix.Component.assign_new(:infinite_range_end, fn -> 0 end)
-    |> Phoenix.Component.assign_new(:infinite_has_previous, fn -> false end)
-    |> Phoenix.Component.assign_new(:infinite_has_next, fn -> false end)
-    |> Phoenix.Component.assign_new(:infinite_selectable_ids, fn -> MapSet.new() end)
-    |> Phoenix.Component.assign_new(:total_count, fn -> nil end)
-    |> Phoenix.Component.assign_new(:count_failed?, fn -> false end)
-    |> Phoenix.Component.assign_new(:count_mode, fn -> true end)
   end
 
   @doc """

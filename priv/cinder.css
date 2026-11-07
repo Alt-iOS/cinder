@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 /* Tailwind v4 content sources for Cinder.
  *
  * Enumerates every top-level path under lib/cinder/ except themes/.
@@ -13,8 +19,10 @@
 
 @source "../lib/cinder.ex";
 @source "../lib/cinder/*.ex";
+@source "../lib/cinder/engine/**/*.ex";
 @source "../lib/cinder/filter/**/*.ex";
 @source "../lib/cinder/filters/**/*.ex";
+@source "../lib/cinder/next/**/*.ex";
 @source "../lib/cinder/renderers/**/*.ex";
 @source "../lib/cinder/table/**/*.ex";
 @source "../lib/cinder/theme/**/*.ex";

@@ -12,15 +12,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
   import ExUnit.CaptureLog, only: [capture_log: 1]
 
   import Phoenix.LiveViewTest,
-    only: [
-      live: 2,
-      element: 2,
-      render_click: 1,
-      render_change: 2,
-      render_async: 1,
-      render: 1,
-      has_element?: 2
-    ]
+    only: [live: 2, element: 2, render_click: 1, render_async: 1, render: 1, has_element?: 2]
 
   # Opt back into async loading for this test (ConnCase's setup disabled it).
   setup {Cinder.TestHelpers, :enable_async_loading}
@@ -32,7 +24,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
   defp sync_album_collection(assigns) do
     ~H"""
     <Cinder.collection
-      resource={Cinder.Integration.Album}
+      resource={Music.Album}
       url_state={@url_state}
       initial_load={:sync}
     >
@@ -44,7 +36,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
   # Deliberately uses the string form of the mode, so it stays covered.
   defp sync_no_url_album_collection(assigns) do
     ~H"""
-    <Cinder.collection resource={Cinder.Integration.Album} initial_load="sync">
+    <Cinder.collection resource={Music.Album} initial_load="sync">
       <:col :let={album} field="title" filter sort>{album.title}</:col>
     </Cinder.collection>
     """
@@ -52,7 +44,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
 
   defp default_album_collection(assigns) do
     ~H"""
-    <Cinder.collection resource={Cinder.Integration.Album} url_state={@url_state}>
+    <Cinder.collection resource={Music.Album} url_state={@url_state}>
       <:col :let={album} field="title" filter sort>{album.title}</:col>
     </Cinder.collection>
     """
@@ -61,26 +53,11 @@ defmodule Cinder.Integration.AsyncLoadTest do
   defp async_album_collection(assigns) do
     ~H"""
     <Cinder.collection
-      resource={Cinder.Integration.Album}
+      resource={Music.Album}
       url_state={@url_state}
       initial_load={:async}
     >
       <:col :let={album} field="title" filter sort>{album.title}</:col>
-    </Cinder.collection>
-    """
-  end
-
-  defp infinite_search_album_collection(assigns) do
-    ~H"""
-    <Cinder.collection
-      id="infinite-search-albums"
-      resource={Cinder.Integration.Album}
-      pagination={:infinite}
-      page_size={3}
-      initial_load={:sync}
-    >
-      <:col :let={album} field="title" search>{album.title}</:col>
-      <:loading><p id="albums-loading">Loading albums</p></:loading>
     </Cinder.collection>
     """
   end
@@ -91,16 +68,15 @@ defmodule Cinder.Integration.AsyncLoadTest do
     generate(album(title: "Buffered Album", genre: :rock, artist_id: artist.id))
 
     on_exit(fn ->
-      Ash.bulk_destroy!(Cinder.Integration.Album, :destroy, %{})
-      Ash.bulk_destroy!(Cinder.Integration.Artist, :destroy, %{})
+      Ash.bulk_destroy!(Music.Album, :destroy, %{})
+      Ash.bulk_destroy!(Music.Artist, :destroy, %{})
     end)
 
     %{
       sync_path: Cinder.TestLive.Fixture.register(&sync_album_collection/1),
       sync_no_url_path: Cinder.TestLive.Fixture.register(&sync_no_url_album_collection/1),
       default_path: Cinder.TestLive.Fixture.register(&default_album_collection/1),
-      async_path: Cinder.TestLive.Fixture.register(&async_album_collection/1),
-      infinite_search_path: Cinder.TestLive.Fixture.register(&infinite_search_album_collection/1)
+      async_path: Cinder.TestLive.Fixture.register(&async_album_collection/1)
     }
   end
 
@@ -135,7 +111,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
     path =
       Cinder.TestLive.Fixture.register(fn assigns ->
         ~H"""
-        <Cinder.collection id="albums" resource={Cinder.Integration.Album}>
+        <Cinder.collection id="albums" resource={Music.Album}>
           <:col :let={album} field="title">{album.title}</:col>
         </Cinder.collection>
         """
@@ -171,7 +147,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
     assert render(view) =~ "Async Album"
 
     old_album =
-      Cinder.Integration.Album
+      Music.Album
       |> Ash.read!()
       |> Enum.find(&(&1.title == "Async Album"))
 
@@ -220,7 +196,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
   end
 
   test "silent refresh of an empty collection uses normal loading and error states", %{conn: conn} do
-    Ash.bulk_destroy!(Cinder.Integration.Album, :destroy, %{})
+    Ash.bulk_destroy!(Music.Album, :destroy, %{})
     view = mount_refresh_collection(conn)
     assert has_element?(view, ~s([data-key="empty_class"]))
     query_pid = start_paused_refresh(view, fn _query, _opts -> {:error, :refresh_failed} end)
@@ -303,7 +279,7 @@ defmodule Cinder.Integration.AsyncLoadTest do
     path =
       Cinder.TestLive.Fixture.register(fn assigns ->
         ~H"""
-        <Cinder.collection resource={Cinder.Integration.Album} initial_load={:synk}>
+        <Cinder.collection resource={Music.Album} initial_load={:synk}>
           <:col :let={album} field="title">{album.title}</:col>
         </Cinder.collection>
         """
@@ -326,41 +302,5 @@ defmodule Cinder.Integration.AsyncLoadTest do
       |> html_response(200)
 
     refute html =~ "Async Album"
-  end
-
-  test "an infinite collection starting over shows its loading state in place of the old rows", %{
-    conn: conn,
-    infinite_search_path: path
-  } do
-    {:ok, view, html} = live(conn, path)
-    assert html =~ "Async Album"
-
-    html =
-      view
-      |> element("form[phx-change=filter_change]")
-      |> render_change(%{"search" => "Buffered"})
-
-    refute html =~ "Async Album"
-    assert html =~ "Loading albums"
-
-    html = render_async(view)
-    assert html =~ "Buffered Album"
-    refute html =~ "Loading albums"
-  end
-
-  test "a change that leaves the filters and search as they were keeps the rows", %{
-    conn: conn,
-    sync_no_url_path: path
-  } do
-    {:ok, view, html} = live(conn, path)
-    assert html =~ "Async Album"
-    form = element(view, "form[phx-change=filter_change]")
-
-    # Typing in a filter's own search box, say, changes nothing the collection reads.
-    refute render_change(form, %{"filters" => %{"title" => "", "title_search" => "Buf"}}) =~
-             ~s(data-key="loading_overlay_class")
-
-    assert render_change(form, %{"filters" => %{"title" => "Buffered"}}) =~
-             ~s(data-key="loading_overlay_class")
   end
 end

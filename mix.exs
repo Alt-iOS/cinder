@@ -1,7 +1,11 @@
+# SPDX-FileCopyrightText: 2025 Cinder contributors <https://github.com/sevenseacat/cinder/graphs/contributors>
+#
+# SPDX-License-Identifier: MIT
+
 defmodule Cinder.MixProject do
   use Mix.Project
 
-  @version "0.17.0"
+  @version "1.0.0-dev"
   @source_url "https://github.com/sevenseacat/cinder"
 
   def project do
@@ -11,6 +15,7 @@ defmodule Cinder.MixProject do
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
+      compilers: [:phoenix_live_view] ++ Mix.compilers(),
       consolidate_protocols: Mix.env() == :prod,
       deps: deps(),
       docs: docs(),
@@ -53,7 +58,10 @@ defmodule Cinder.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ash, "~> 3.0"},
+      {:ash, "~> 3.24 and >= 3.24.5"},
+      # Not used directly: for SQL data layers, 0.6.3 is the first that supports the
+      # `string_starts_with`/`string_ends_with` text filters use
+      {:ash_sql, ">= 0.6.3", optional: true},
       {:ash_phoenix, "~> 2.3"},
       {:phoenix_live_view, "~> 1.1"},
       {:gettext, "~> 1.0.0"},
@@ -65,6 +73,7 @@ defmodule Cinder.MixProject do
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:mimic, "~> 2.3", only: :test},
       {:phoenix_test, "~> 0.11", only: :test, runtime: false},
+      {:lazy_html, ">= 0.1.0", only: :test},
       {:ex_check, "~> 0.16", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
@@ -73,7 +82,7 @@ defmodule Cinder.MixProject do
   end
 
   defp description do
-    "A powerful, intelligent data table component for Phoenix LiveView applications with seamless Ash Framework integration."
+    "Tables, lists and grids of Ash resources in Phoenix LiveView, with filtering, sorting, search and pagination."
   end
 
   defp package do
@@ -83,15 +92,19 @@ defmodule Cinder.MixProject do
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url, "Website" => "https://cinder.sevenseacat.net"},
       files:
-        ~w(lib priv i18n .formatter.exs mix.exs README.md CHANGELOG.md LICENSE usage-rules.md)
+        ~w(lib priv/cinder.css priv/themes i18n .formatter.exs mix.exs README.md CHANGELOG.md LICENSE LICENSES REUSE.toml usage-rules.md)
     ]
   end
 
   defp docs do
+    main? = System.get_env("DOCS_MAIN") == "1"
+
     [
       main: "readme",
-      source_ref: "v#{@version}",
+      source_ref: if(main?, do: "main", else: "v#{@version}"),
+      before_closing_body_tag: &unreleased_banner(&1, main?),
       source_url: @source_url,
+      logo: "logos/buddy-icon.png",
       extras: [
         "README.md",
         "docs/getting-started.md",
@@ -106,6 +119,8 @@ defmodule Cinder.MixProject do
         "docs/examples.md",
         "CHANGELOG.md"
       ],
+      # They name deprecated functions, which are hidden from the docs
+      skip_undefined_reference_warnings_on: ["docs/upgrading.md", "CHANGELOG.md"],
       groups_for_modules: [
         "Core Components": [
           Cinder,
@@ -114,8 +129,7 @@ defmodule Cinder.MixProject do
           Cinder.LiveComponent
         ],
         "URL State Management": [
-          Cinder.UrlSync,
-          Cinder.UrlManager
+          Cinder.UrlSync
         ],
         Refresh: [
           Cinder.Refresh,
@@ -124,6 +138,7 @@ defmodule Cinder.MixProject do
         "Filter Types": [
           Cinder.Filter,
           Cinder.Filter.Helpers,
+          Cinder.Filter.Debug,
           ~r/Cinder\.Filters\./
         ],
         Renderers: [
@@ -142,14 +157,6 @@ defmodule Cinder.MixProject do
         "Mix Tasks": [
           ~r/Mix\.Tasks\./
         ],
-        Internal: [
-          Cinder.QueryBuilder,
-          Cinder.Column,
-          Cinder.FilterManager,
-          Cinder.Filter.Debug,
-          Cinder.PageSize,
-          Cinder.BulkActionExecutor
-        ],
         Deprecated: [
           Cinder.Table,
           Cinder.Table.UrlSync,
@@ -158,4 +165,20 @@ defmodule Cinder.MixProject do
       ]
     ]
   end
+
+  # Docs built from `main` go to GitHub Pages, and mustn't pass for the released docs on hexdocs
+  defp unreleased_banner(:html, true) do
+    """
+    <script>
+      document.getElementById("content").insertAdjacentHTML("afterbegin", `
+        <section role="note" class="admonition warning">
+          <h4 class="admonition-title warning">Unreleased</h4>
+          <p>These docs are built from Cinder's <code>main</code> branch.
+          For the latest release, see <a href="https://cinder.hexdocs.pm">cinder.hexdocs.pm</a>.</p>
+        </section>`)
+    </script>
+    """
+  end
+
+  defp unreleased_banner(_format, _main?), do: ""
 end

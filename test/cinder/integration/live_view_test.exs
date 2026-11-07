@@ -10,9 +10,6 @@ defmodule Cinder.Integration.LiveViewTest do
   separately by `Cinder.Integration.AsyncLoadTest`.
   """
   use Cinder.ConnCase, async: false
-  require Ash.Query
-
-  require Ash.Query
 
   # The collection markup under test. The fixture LiveView has no logic of its
   # own — this function supplies the template, so what's exercised is real
@@ -20,7 +17,7 @@ defmodule Cinder.Integration.LiveViewTest do
   defp album_collection(assigns) do
     ~H"""
     <Cinder.collection
-      resource={Cinder.Integration.Album}
+      resource={Music.Album}
       url_state={@url_state}
       page_size={[default: 25, options: [3, 5, 10, 25]]}
     >
@@ -29,83 +26,6 @@ defmodule Cinder.Integration.LiveViewTest do
       <:col :let={album} field="price" filter sort>{Decimal.to_string(album.price)}</:col>
       <:col :let={album} field="release_date" filter sort>{to_string(album.release_date)}</:col>
       <:col :let={album} field="is_remastered" filter>{to_string(album.is_remastered)}</:col>
-    </Cinder.collection>
-    """
-  end
-
-  defp infinite_album_collection(assigns) do
-    ~H"""
-    <Cinder.collection
-      id="infinite-albums"
-      resource={Cinder.Integration.Album}
-      pagination={:infinite}
-      page_size={3}
-      overscan={0}
-      selectable
-      show_item_numbers
-    >
-      <:col :let={album} field="title">{album.title}</:col>
-    </Cinder.collection>
-    """
-  end
-
-  defp filtered_select_all_collection(assigns) do
-    assigns = assign(assigns, :query, Ash.Query.filter(Cinder.Integration.Album, genre == :jazz))
-
-    ~H"""
-    <Cinder.collection
-      query={@query}
-      url_state={@url_state}
-      page_size={2}
-      selectable
-    >
-      <:col :let={album} field="title">{album.title}</:col>
-      <:bulk_action action={fn selected_query, _opts -> {:ok, selected_query} end} label="Archive ({count})" />
-    </Cinder.collection>
-    """
-  end
-
-  defp preselected_album_collection(assigns) do
-    query = Ash.Query.filter(Cinder.Integration.Album, genre == :jazz)
-    assigns = assign(assigns, query: query, selected: query |> Ash.read!() |> Enum.map(& &1.id))
-
-    ~H"""
-    <Cinder.collection query={@query} url_state={@url_state} selectable selected={@selected}>
-      <:col :let={album} field="title">{album.title}</:col>
-      <:bulk_action action={fn selected_query, _opts -> {:ok, selected_query} end} label="Archive ({count})" />
-    </Cinder.collection>
-    """
-  end
-
-  defp overscan_album_collection(assigns) do
-    ~H"""
-    <Cinder.collection
-      id="overscan-albums"
-      resource={Cinder.Integration.Album}
-      pagination={:infinite}
-      page_size={3}
-      overscan={1}
-      show_item_numbers
-    >
-      <:col :let={album} field="title">{album.title}</:col>
-    </Cinder.collection>
-    """
-  end
-
-  defp empty_infinite_album_collection(assigns) do
-    query = Ash.Query.filter(Cinder.Integration.Album, title == "No album has this title")
-
-    assigns = assign(assigns, :query, query)
-
-    ~H"""
-    <Cinder.collection
-      id="empty-infinite-albums"
-      query={@query}
-      pagination={:infinite}
-      page_size={3}
-      overscan={0}
-    >
-      <:col :let={album} field="title">{album.title}</:col>
     </Cinder.collection>
     """
   end
@@ -189,107 +109,11 @@ defmodule Cinder.Integration.LiveViewTest do
     )
 
     on_exit(fn ->
-      Ash.bulk_destroy!(Cinder.Integration.Album, :destroy, %{})
-      Ash.bulk_destroy!(Cinder.Integration.Artist, :destroy, %{})
+      Ash.bulk_destroy!(Music.Album, :destroy, %{})
+      Ash.bulk_destroy!(Music.Artist, :destroy, %{})
     end)
 
-    %{
-      path: Cinder.TestLive.Fixture.register(&album_collection/1),
-      select_all_path: Cinder.TestLive.Fixture.register(&filtered_select_all_collection/1)
-    }
-  end
-
-  describe "selection" do
-    test "select all includes every record in the filtered query, not only the page", %{
-      conn: conn,
-      select_all_path: path
-    } do
-      conn
-      |> visit(path)
-      |> assert_has("button", text: "Archive (0)")
-      |> unwrap(fn view ->
-        view
-        |> Phoenix.LiveViewTest.element("input[phx-click=toggle_select_all]")
-        |> Phoenix.LiveViewTest.render_click()
-      end)
-      |> assert_has("button", text: "Archive (3)")
-    end
-
-    test "a collection starts with the IDs it is given selected", %{conn: conn} do
-      path = Cinder.TestLive.Fixture.register(&preselected_album_collection/1)
-      count = Cinder.Integration.Album |> Ash.Query.filter(genre == :jazz) |> Ash.count!()
-
-      conn
-      |> visit(path)
-      |> assert_has("button", text: "Archive (#{count})")
-      |> assert_has("input[phx-click=toggle_select][checked]", count: count)
-    end
-
-    test "infinite query deselections survive loading more batches", %{conn: conn} do
-      path = Cinder.TestLive.Fixture.register(&infinite_album_collection/1)
-
-      conn
-      |> visit(path)
-      |> unwrap(fn view ->
-        first_id = item_id(view, 1)
-        second_id = item_id(view, 2)
-
-        view
-        |> Phoenix.LiveViewTest.element("input[phx-click=toggle_select_all]")
-        |> Phoenix.LiveViewTest.render_click()
-
-        assert first_id in selected_ids(view)
-        assert second_id in selected_ids(view)
-
-        view
-        |> Phoenix.LiveViewTest.element(
-          "tr[data-item-number=\"1\"] input[phx-click=toggle_select]"
-        )
-        |> Phoenix.LiveViewTest.render_click()
-
-        refute first_id in selected_ids(view)
-        assert second_id in selected_ids(view)
-
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
-        |> Phoenix.LiveViewTest.render_click()
-
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
-        |> Phoenix.LiveViewTest.render_click()
-
-        assert Phoenix.LiveViewTest.has_element?(view, "tr[data-item-number=\"1\"]")
-        assert Phoenix.LiveViewTest.has_element?(view, "tr[data-item-number=\"9\"]")
-        refute Phoenix.LiveViewTest.has_element?(view, "button[phx-click=load_previous]")
-        refute first_id in selected_ids(view)
-        assert second_id in selected_ids(view)
-
-        Phoenix.LiveViewTest.render(view)
-      end)
-    end
-  end
-
-  defp item_id(view, number) do
-    html =
-      view
-      |> Phoenix.LiveViewTest.element("tr[data-item-number=\"#{number}\"]")
-      |> Phoenix.LiveViewTest.render()
-
-    [_, id] = Regex.run(~r/data-item-id="([^"]+)"/, html)
-    id
-  end
-
-  defp selected_ids(view) do
-    html =
-      view
-      |> Phoenix.LiveViewTest.element("#infinite-albums-infinite-stream")
-      |> Phoenix.LiveViewTest.render()
-
-    [_, encoded] = Regex.run(~r/data-selected-ids="([^"]*)"/, html)
-
-    encoded
-    |> String.replace("&quot;", "\"")
-    |> Jason.decode!()
+    %{path: Cinder.TestLive.Fixture.register(&album_collection/1)}
   end
 
   describe "initial render" do
@@ -299,14 +123,6 @@ defmodule Cinder.Integration.LiveViewTest do
       |> assert_has("td", text: "Dirt")
       |> assert_has("td", text: "Blue Train")
       |> assert_has("td", text: "Pop Hits Vol 1")
-    end
-
-    test "empty infinite collection displays the existing empty state", %{conn: conn} do
-      path = Cinder.TestLive.Fixture.register(&empty_infinite_album_collection/1)
-
-      conn
-      |> visit(path)
-      |> assert_has("[data-key=empty_class]", text: "No results found")
     end
   end
 
@@ -407,84 +223,6 @@ defmodule Cinder.Integration.LiveViewTest do
       |> assert_has("td", text: "Facelift")
       |> refute_has("td", text: "Dirt")
     end
-
-    test "an infinite collection reads its first batch and its overscan in one query", %{
-      conn: conn
-    } do
-      path = Cinder.TestLive.Fixture.register(&overscan_album_collection/1)
-      test_pid = self()
-      handler = {__MODULE__, :album_reads}
-      domain = Ash.Domain.Info.short_name(Cinder.Integration.Domain)
-
-      :telemetry.attach(
-        handler,
-        [:ash, domain, :read, :stop],
-        fn
-          # The connected view's reads; in these synchronous tests the dead render, in the
-          # test process, reads its own first load.
-          _event, _measurements, %{resource: Cinder.Integration.Album}, _config
-          when self() != test_pid ->
-            send(test_pid, :album_read)
-
-          _event, _measurements, _metadata, _config ->
-            :ok
-        end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach(handler) end)
-
-      conn
-      |> visit(path)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
-      |> unwrap(&Phoenix.LiveViewTest.render/1)
-      |> tap(fn _session -> assert album_reads() == 1 end)
-      |> unwrap(fn view ->
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
-        |> Phoenix.LiveViewTest.render_click()
-      end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 9)
-
-      assert album_reads() == 1
-    end
-
-    test "infinite streams keep every loaded batch in the browser", %{conn: conn} do
-      path = Cinder.TestLive.Fixture.register(&infinite_album_collection/1)
-
-      conn
-      |> visit(path)
-      |> assert_has("#infinite-albums-infinite-stream[phx-hook=CinderInfiniteStream]")
-      |> refute_has("#infinite-albums-stream-selection-state")
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 3)
-      |> unwrap(fn view ->
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
-        |> Phoenix.LiveViewTest.render_click()
-      end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 6)
-      |> unwrap(fn view ->
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
-        |> Phoenix.LiveViewTest.render_click()
-      end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 9)
-      |> assert_has("tr[data-item-number=\"1\"]")
-      |> unwrap(fn view ->
-        view
-        |> Phoenix.LiveViewTest.element("button[phx-click=load_more]")
-        |> Phoenix.LiveViewTest.render_click()
-      end)
-      |> assert_has("tbody[phx-update=stream] tr[data-item-number]", count: 10)
-      |> assert_has("tr[data-item-number=\"1\"]")
-      |> assert_has("tr[data-item-number=\"10\"]")
-      |> assert_has(
-        "[data-pagination-mode=infinite] [data-pagination-state=end][data-key=pagination_info_class]",
-        text: "You have reached the end of this list"
-      )
-      |> refute_has("[data-pagination-mode=infinite] [data-key=page_size_container_class]")
-      |> refute_has("button[phx-click=load_previous]")
-    end
   end
 
   describe "URL state round-trip" do
@@ -509,15 +247,6 @@ defmodule Cinder.Integration.LiveViewTest do
       |> assert_has("td", text: "Dirt")
       |> refute_has("td", text: "Blue Train")
       |> assert_has("tr[data-key=row_class]:first-child td:first-child", text: "Dirt")
-    end
-  end
-
-  # The reads the collection sent since the last count.
-  defp album_reads(count \\ 0) do
-    receive do
-      :album_read -> album_reads(count + 1)
-    after
-      0 -> count
     end
   end
 end

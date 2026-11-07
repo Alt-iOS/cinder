@@ -175,26 +175,6 @@ defmodule Cinder.Renderers.StateSlotsTest do
   # TABLE RENDERER
   # ============================================================================
 
-  describe "loading marker" do
-    test "each layout's container says it is loading while it loads, and only then" do
-      for {render, assigns} <- [
-            {&TableRenderer.render/1, &table_assigns/1},
-            {&ListRenderer.render/1, &list_assigns/1},
-            {&GridRenderer.render/1, &grid_assigns/1}
-          ] do
-        assert render_component(render, assigns.(%{loading: true})) =~
-                 ~r/data-key="container_class"[^>]*data-loading/
-
-        refute render_component(render, assigns.(%{loading: false})) =~ "data-loading"
-      end
-    end
-
-    test "an infinite collection appending to the rows it shows is not marked" do
-      appending = %{loading: true, pagination_mode: :infinite, infinite_loaded_count: 10}
-      refute render_component(&TableRenderer.render/1, table_assigns(appending)) =~ "data-loading"
-    end
-  end
-
   describe "table renderer - default states" do
     test "shows default empty message when no data and no error" do
       html = render_component(&TableRenderer.render/1, table_assigns())
@@ -598,14 +578,6 @@ defmodule Cinder.Renderers.StateSlotsTest do
   # ============================================================================
 
   describe "backward compatibility" do
-    test "table renders normally without new assigns (slots default to empty)" do
-      # No loading_slot, empty_slot, error_slot - should use defaults
-      html = render_component(&TableRenderer.render/1, table_assigns())
-
-      assert html =~ "No results found"
-      refute html =~ "An error occurred"
-    end
-
     test "loading_message string attr still works" do
       assigns =
         table_assigns(%{
