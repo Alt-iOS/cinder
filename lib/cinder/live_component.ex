@@ -278,6 +278,7 @@ defmodule Cinder.LiveComponent do
     if socket.assigns.pagination_mode == :keyset do
       socket =
         socket
+        |> assign(:current_page, socket.assigns.current_page + 1)
         |> assign(:after_keyset, socket.assigns.last_keyset)
         |> assign(:before_keyset, nil)
         |> notify_state_change()
@@ -295,6 +296,7 @@ defmodule Cinder.LiveComponent do
     if socket.assigns.pagination_mode == :keyset do
       socket =
         socket
+        |> assign(:current_page, max(socket.assigns.current_page - 1, 1))
         |> assign(:before_keyset, socket.assigns.first_keyset)
         |> assign(:after_keyset, nil)
         |> notify_state_change()
@@ -976,6 +978,19 @@ defmodule Cinder.LiveComponent do
         before: Cinder.UrlManager.decode_cursor(Map.get(raw_params, "before"))
       }
 
+      current_page =
+        cond do
+          socket.assigns.pagination_mode == :offset ->
+            decoded_state.current_page
+
+          decoded_state.after == socket.assigns.after_keyset and
+              decoded_state.before == socket.assigns.before_keyset ->
+            socket.assigns.current_page
+
+          true ->
+            1
+        end
+
       final_sort_by =
         cond do
           decoded_state.sort_by != [] ->
@@ -1017,7 +1032,7 @@ defmodule Cinder.LiveComponent do
 
       updated_socket
       |> assign(:filters, decoded_state.filters)
-      |> assign(:current_page, decoded_state.current_page)
+      |> assign(:current_page, current_page)
       |> assign(:sort_by, final_sort_by)
       |> assign(:search_term, decoded_state.search_term)
     else

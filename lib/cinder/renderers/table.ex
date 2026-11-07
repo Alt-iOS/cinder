@@ -24,6 +24,11 @@ defmodule Cinder.Renderers.Table do
   Renders the table layout.
   """
   def render(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:show_item_numbers, fn -> false end)
+      |> assign_new(:current_page, fn -> 1 end)
+
     ~H"""
     <div class={[@theme.container_class, "relative"]} data-key="container_class">
       <!-- Filter Controls (including search) -->
@@ -59,6 +64,7 @@ defmodule Cinder.Renderers.Table do
         <table class={@theme.table_class} data-key="table_class">
           <thead class={@theme.thead_class} data-key="thead_class">
             <tr class={@theme.header_row_class} data-key="header_row_class">
+              <th :if={@show_item_numbers} class={[@theme.th_class, "w-10"]} data-item-number-heading>#</th>
               <th :if={Selection.enabled?(@selectable)} class={[@theme.th_class, "w-10"]} data-key="th_class">
                 <input
                   type="checkbox"
@@ -86,12 +92,13 @@ defmodule Cinder.Renderers.Table do
               </th>
             </tr>
           </thead>
-          <tbody class={[@theme.tbody_class, (@show_loading_state && "opacity-75" || "")]} data-key="tbody_class">
-            <tr :for={item <- @data} :if={not @error}
+          <tbody id={"#{@id}-items"} class={[@theme.tbody_class, (@show_loading_state && "opacity-75" || "")]} data-key="tbody_class">
+            <tr :for={{item, index} <- Enum.with_index(@data)} :if={not @error}
                 class={selection_classes(@theme.row_class, Map.get(assigns, :item_class), @row_click, @selectable, @selected_ids, item, @id_field, Map.get(@theme, :selected_row_class))}
                 data-item-id={to_string(Map.get(item, @id_field))}
                 data-key="row_class"
                 phx-click={selection_click_action(@row_click, @selectable, @selected_ids, item, @id_field, @myself)}>
+              <td :if={@show_item_numbers} class={[@theme.td_class, "tabular-nums"]} data-item-number>{row_number(index, @current_page, @page)}</td>
               <td :if={Selection.enabled?(@selectable)} class={[@theme.td_class, "w-10"]} data-key="td_class">
                 <input
                   type="checkbox"
@@ -115,7 +122,7 @@ defmodule Cinder.Renderers.Table do
             </tr>
             <!-- Error State -->
             <tr :if={@error and not @loading}>
-              <td colspan={column_count(@columns, @selectable)} class={@theme.empty_class} data-key="error_class">
+              <td colspan={column_count(@columns, @selectable) + if(@show_item_numbers, do: 1, else: 0)} class={@theme.empty_class} data-key="error_class">
                 <%= if has_slot?(assigns, :error_slot) do %>
                   {render_slot(@error_slot)}
                 <% else %>
@@ -183,6 +190,10 @@ defmodule Cinder.Renderers.Table do
   end
 
   defp all_page_selected?(_selected_ids, _data, _id_field, _selectable), do: false
+
+  defp row_number(index, _current, %Ash.Page.Offset{offset: offset}), do: offset + index + 1
+  defp row_number(index, current, %{limit: limit}), do: (current - 1) * limit + index + 1
+  defp row_number(index, _current, _page), do: index + 1
 
   defp column_count(columns, selectable) do
     base_count = length(columns)

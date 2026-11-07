@@ -217,4 +217,26 @@ defmodule Cinder.Renderers.TableSelectionTest do
       refute html =~ ~r/<input[^>]*checked[^>]*phx-click="toggle_select_all_page"/
     end
   end
+
+  test "table row numbers follow offset and cursor page positions" do
+    for {page, current, expected} <- [
+          {%Ash.Page.Offset{offset: 10, limit: 10, results: [], more?: false}, 1, "11"},
+          {%Ash.Page.Keyset{limit: 10, results: [], more?: false}, 3, "21"}
+        ] do
+      html =
+        render_component(
+          &TableRenderer.render/1,
+          base_assigns()
+          |> Map.merge(%{
+            show_item_numbers: true,
+            current_page: current,
+            page: page,
+            data: [%{id: "one", name: "One"}]
+          })
+        )
+
+      assert html =~ ~s(id="test-table-items")
+      assert html =~ ~r/data-item-number[^>]*>\s*#{expected}\s*<\/td>/
+    end
+  end
 end

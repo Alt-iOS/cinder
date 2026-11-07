@@ -147,6 +147,8 @@ defmodule Cinder.Collection do
 
   attr(:show_pagination, :boolean, default: true, doc: "Whether to show pagination controls")
 
+  attr(:show_item_numbers, :boolean, default: false, doc: "Show sequential row numbers")
+
   attr(:pagination, :any,
     default: :offset,
     doc:
@@ -513,6 +515,7 @@ defmodule Cinder.Collection do
         search_label={@search_label}
         search_placeholder={@search_placeholder}
         search_fn={@search_fn}
+        show_item_numbers={@show_item_numbers}
         pagination_mode={@pagination_mode}
         count_mode={@count_mode}
         id_field={@id_field}
