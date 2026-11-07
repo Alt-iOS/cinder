@@ -44,7 +44,7 @@ defmodule Cinder.Renderers.Grid do
       |> assign(:grid_item_data_key, item_data_key)
 
     ~H"""
-    <div class={[@theme.container_class, "relative"]} data-key="container_class">
+    <div class={[@theme.container_class, "relative"]} data-key="container_class" data-loading={@show_loading_state}>
       <!-- Controls Area (filters + sort) -->
       <div :if={@show_filters || (@show_sort && SortControls.has_sortable_columns?(@columns))} class={[@theme.controls_class, "!flex !flex-col"]} data-key="controls_class">
         <!-- Filter Controls (including search) -->
@@ -158,6 +158,7 @@ defmodule Cinder.Renderers.Grid do
 
       <!-- Pagination -->
       <Pagination.render
+        loading={@show_loading_state}
         page={@page}
         page_size_config={@page_size_config}
         theme={@theme}

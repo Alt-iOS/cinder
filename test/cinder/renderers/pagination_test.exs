@@ -181,4 +181,21 @@ defmodule Cinder.Renderers.PaginationTest do
       assert render_component(&Pagination.render/1, assigns) =~ "Next"
     end
   end
+
+  test "pager buttons are disabled during a reload" do
+    for mode <- [:offset, :keyset] do
+      html =
+        render_component(
+          &Pagination.render/1,
+          base_assigns("reload") |> Map.merge(%{loading: true, pagination_mode: mode})
+        )
+
+      buttons =
+        Regex.scan(~r/<button[^>]*phx-click="(?:goto_page|prev_page|next_page)"[^>]*>/, html)
+        |> List.flatten()
+
+      assert buttons != []
+      assert Enum.all?(buttons, &String.contains?(&1, " disabled"))
+    end
+  end
 end

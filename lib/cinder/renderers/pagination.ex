@@ -44,6 +44,7 @@ defmodule Cinder.Renderers.Pagination do
   - `show_pagination` - Boolean to enable/disable pagination (default: true)
   """
   def render(assigns) do
+    assigns = assign_new(assigns, :loading, fn -> false end)
     pagination_mode = Map.get(assigns, :pagination_mode, :offset)
 
     show =
@@ -134,7 +135,7 @@ defmodule Cinder.Renderers.Pagination do
           <!-- First page and previous -->
           <button
             :if={@page_number > 2}
-            phx-click="goto_page"
+            phx-click="goto_page" disabled={@loading}
             phx-value-page="1"
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -146,7 +147,7 @@ defmodule Cinder.Renderers.Pagination do
 
           <button
             :if={@has_prev}
-            phx-click="goto_page"
+            phx-click="goto_page" disabled={@loading}
             phx-value-page={@page_number - 1}
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -160,7 +161,7 @@ defmodule Cinder.Renderers.Pagination do
           <span :for={page <- @page_range} class="inline-flex">
             <button
               :if={page != @page_number}
-              phx-click="goto_page"
+              phx-click="goto_page" disabled={@loading}
               phx-value-page={page}
               phx-target={@myself}
               class={@theme.pagination_button_class}
@@ -177,7 +178,7 @@ defmodule Cinder.Renderers.Pagination do
           <!-- Next and last page -->
           <button
             :if={@has_next}
-            phx-click="goto_page"
+            phx-click="goto_page" disabled={@loading}
             phx-value-page={@page_number + 1}
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -189,7 +190,7 @@ defmodule Cinder.Renderers.Pagination do
 
           <button
             :if={@total_pages && @page_number < @total_pages - 1}
-            phx-click="goto_page"
+            phx-click="goto_page" disabled={@loading}
             phx-value-page={@total_pages}
             phx-target={@myself}
             class={@theme.pagination_button_class}
@@ -250,7 +251,7 @@ defmodule Cinder.Renderers.Pagination do
             phx-target={@myself}
             class={@theme.pagination_button_class}
             data-key="pagination_button_class"
-            disabled={!@has_prev}
+            disabled={!@has_prev or @loading}
             title={dgettext("cinder", "Previous page")}
           >
             &lsaquo; {dgettext("cinder", "Prev")}
@@ -262,7 +263,7 @@ defmodule Cinder.Renderers.Pagination do
             phx-target={@myself}
             class={@theme.pagination_button_class}
             data-key="pagination_button_class"
-            disabled={!@has_next}
+            disabled={!@has_next or @loading}
             title={dgettext("cinder", "Next page")}
           >
             {dgettext("cinder", "Next")} &rsaquo;

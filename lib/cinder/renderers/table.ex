@@ -25,7 +25,7 @@ defmodule Cinder.Renderers.Table do
   """
   def render(assigns) do
     ~H"""
-    <div class={[@theme.container_class, "relative"]} data-key="container_class">
+    <div class={[@theme.container_class, "relative"]} data-key="container_class" data-loading={@show_loading_state}>
       <!-- Filter Controls (including search) -->
       <div :if={@show_filters} class={@theme.controls_class} data-key="controls_class">
         <Cinder.FilterManager.render_filter_controls
@@ -156,6 +156,7 @@ defmodule Cinder.Renderers.Table do
 
       <!-- Pagination -->
       <Pagination.render
+        loading={@show_loading_state}
         page={@page}
         page_size_config={@page_size_config}
         theme={@theme}
